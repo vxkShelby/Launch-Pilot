@@ -119,6 +119,14 @@ button:disabled {
   margin-top: 0.5rem;
 }
 
+.launcher-loading {
+  padding: 0.6rem 0.9rem;
+  border: 1px solid #1e222e;
+  border-radius: 6px;
+  margin-bottom: 0.75rem;
+  font-size: 0.9rem;
+}
+
 .launcher-section {
   border: 1px solid #1e222e;
   border-radius: 6px;
@@ -183,11 +191,38 @@ button:disabled {
 
 .game-name {
   flex: 1;
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.game-name-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.game-icon {
+  width: 16px;
+  height: 16px;
+  border-radius: 3px;
+  object-fit: contain;
+  flex-shrink: 0;
 }
 
 .game-size {
   color: #7a8296;
   font-variant-numeric: tabular-nums;
+  font-size: 0.8rem;
+  flex-shrink: 0;
+}
+
+.update-size {
+  color: #7a8296;
+  font-variant-numeric: tabular-nums;
+  font-size: 0.8rem;
 }
 
 .status {
@@ -235,6 +270,15 @@ button:disabled {
   display: flex;
   align-items: center;
   gap: 0.6rem;
+}
+
+.launcher-icon {
+  width: 16px;
+  height: 16px;
+  border-radius: 3px;
+  object-fit: contain;
+  vertical-align: middle;
+  margin-right: 0.4rem;
 }
 
 .running-dot {

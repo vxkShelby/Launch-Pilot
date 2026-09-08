@@ -148,7 +148,33 @@ impl LauncherProvider for GogProvider {
         &["GalaxyClient.exe"]
     }
 
+    // Real, verified live: HKLM\...\GOG.com\GalaxyClient\paths\client (the
+    // install dir, "X:\GOG Galaxy") plus \GalaxyClient\clientExecutable
+    // ("GalaxyClient.exe") combine into the real exe path — confirmed to
+    // exist on disk on this machine. detect()/list_games() intentionally
+    // don't rely on this key (it's separate from the per-game Games key
+    // they use, and this project's own docs note the Galaxy client itself
+    // wasn't otherwise verified installed) — but the registry key is real
+    // regardless, so it's fine to use just for the icon.
+    fn icon_source(&self) -> Option<std::path::PathBuf> {
+        let hklm = winreg::RegKey::predef(winreg::enums::HKEY_LOCAL_MACHINE);
+        let key = hklm.open_subkey("SOFTWARE\\WOW6432Node\\GOG.com\\GalaxyClient").ok()?;
+        let exe_name: String = key.get_value("clientExecutable").ok()?;
+        let client_dir: String = key.open_subkey("paths").ok()?.get_value("client").ok()?;
+        Some(std::path::PathBuf::from(client_dir).join(exe_name))
+    }
+
     fn trigger_update(&self, game_id: &str) -> Result<(), String> {
         open::that(format!("goggalaxy://openGameView/{game_id}")).map_err(|e| e.to_string())
+    }
+
+    // GOG's own per-game registry entry has a real, exact `exe` value
+    // (verified live: "X:\GOG Galaxy\Games\Celtic Kings\Celtic Kings.exe")
+    // — no heuristic needed, unlike providers that only know an install
+    // folder.
+    fn game_icon_source(&self, game_id: &str) -> Option<std::path::PathBuf> {
+        let hklm = winreg::RegKey::predef(winreg::enums::HKEY_LOCAL_MACHINE);
+        let exe: String = hklm.open_subkey(GAMES_KEY).ok()?.open_subkey(game_id).ok()?.get_value("exe").ok()?;
+        Some(std::path::PathBuf::from(exe))
     }
 }

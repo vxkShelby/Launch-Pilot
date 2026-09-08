@@ -1,26 +1,6 @@
 use crate::providers::{all_providers, Game};
 use serde::Serialize;
 
-#[derive(Serialize)]
-pub struct LauncherInfo {
-    id: &'static str,
-    name: &'static str,
-}
-
-#[derive(Serialize)]
-pub struct DashboardData {
-    pub games: Vec<Game>,
-    /// Detected launchers that contributed no games — either nothing is
-    /// installed through them, or (EA/Ubisoft/Battle.net) we only support
-    /// detect+deep-link for that launcher. Lets the dashboard show
-    /// "connected, open it yourself" instead of silently omitting them.
-    pub connected_only: Vec<LauncherInfo>,
-    /// Ids of installed launchers whose own client process is running
-    /// right now, from a single real `tasklist` snapshot — a launcher
-    /// being installed doesn't mean it's open.
-    pub running_launchers: Vec<&'static str>,
-}
-
 /// Real, single Windows process snapshot via the built-in `tasklist` tool
 /// (no extra dependency, works on any Windows install) — one call covers
 /// every provider instead of spawning a process per launcher.
@@ -50,36 +30,181 @@ fn running_process_names() -> std::collections::HashSet<String> {
         .collect()
 }
 
-/// Single pass over all providers — detect() and list_games() run exactly
-/// once each, instead of once per command as with two separate commands.
+/// Static id list — fast, no registry/network/process work — so the
+/// frontend can draw a section per launcher immediately and fill each one
+/// in as its own `provider_data` call resolves, instead of one big call
+/// blocking the whole dashboard behind whichever provider is slowest
+/// (GOG's network round-trip, a big Steam library, etc.).
 #[tauri::command]
-pub fn dashboard_data() -> DashboardData {
-    let mut games = Vec::new();
-    let mut connected_only = Vec::new();
-    let mut running_launchers = Vec::new();
-    let running = running_process_names();
+pub fn launcher_ids() -> Vec<&'static str> {
+    all_providers().iter().map(|p| p.id()).collect()
+}
 
-    for provider in all_providers() {
-        if !provider.detect() {
-            continue;
-        }
-        if provider
-            .process_names()
-            .iter()
-            .any(|name| running.contains(&name.to_ascii_lowercase()))
-        {
-            running_launchers.push(provider.id());
-        }
-        match provider.list_games() {
-            Ok(found) if !found.is_empty() => games.extend(found),
-            _ => connected_only.push(LauncherInfo {
-                id: provider.id(),
-                name: provider.display_name(),
-            }),
-        }
+#[derive(Serialize)]
+pub struct ProviderResult {
+    pub id: &'static str,
+    pub name: &'static str,
+    pub games: Vec<Game>,
+    pub running: bool,
+}
+
+/// Reads the real icon Windows itself associates with a local exe/file
+/// (the exact icon shown in Explorer/the taskbar for that file — via the
+/// standard shell + GDI APIs), and returns it as a `data:image/bmp;base64`
+/// string the frontend can drop straight into an `<img src>`. No icon is
+/// fabricated or guessed: this only ever runs against a path a provider
+/// already resolved as its own real, verified client exe. Returns None on
+/// any failure (missing file, API error) — the frontend just shows no icon.
+#[cfg(windows)]
+fn extract_icon_data_uri(path: &std::path::Path) -> Option<String> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::Graphics::Gdi::{
+        DeleteDC, DeleteObject, GetDC, GetDIBits, GetObjectW, ReleaseDC, BITMAP, BITMAPINFO, BITMAPINFOHEADER,
+        BI_RGB, DIB_RGB_COLORS,
+    };
+    use windows_sys::Win32::UI::Shell::{SHGetFileInfoW, SHFILEINFOW, SHGFI_ICON, SHGFI_SMALLICON};
+    use windows_sys::Win32::UI::WindowsAndMessaging::{DestroyIcon, GetIconInfo, ICONINFO};
+
+    if !path.exists() {
+        return None;
     }
+    // Some providers build paths by joining a forward-slash-normalized
+    // library root (steam.rs's library_paths) with backslash-separated
+    // components — valid for std::fs, which accepts either separator, but
+    // verified live that SHGetFileInfoW silently fails to resolve an icon
+    // for a mixed-separator path ("X:/Steam\steamapps\..."). Normalizing
+    // to backslashes only for this Win32 call fixed every Steam/Steam-
+    // sourced-Ubisoft game that was failing.
+    let normalized = path.to_string_lossy().replace('/', "\\");
+    let wide: Vec<u16> = std::ffi::OsStr::new(&normalized).encode_wide().chain(std::iter::once(0)).collect();
 
-    DashboardData { games, connected_only, running_launchers }
+    unsafe {
+        let mut info: SHFILEINFOW = std::mem::zeroed();
+        let ok = SHGetFileInfoW(
+            wide.as_ptr(),
+            0,
+            &mut info,
+            std::mem::size_of::<SHFILEINFOW>() as u32,
+            SHGFI_ICON | SHGFI_SMALLICON,
+        );
+        if ok == 0 || info.hIcon.is_null() {
+            return None;
+        }
+
+        let mut icon_info: ICONINFO = std::mem::zeroed();
+        if GetIconInfo(info.hIcon, &mut icon_info) == 0 {
+            DestroyIcon(info.hIcon);
+            return None;
+        }
+
+        let mut bmp: BITMAP = std::mem::zeroed();
+        GetObjectW(icon_info.hbmColor as _, std::mem::size_of::<BITMAP>() as i32, &mut bmp as *mut _ as *mut _);
+        let width = bmp.bmWidth;
+        let height = bmp.bmHeight;
+        if width <= 0 || height <= 0 {
+            DeleteObject(icon_info.hbmColor as _);
+            DeleteObject(icon_info.hbmMask as _);
+            DestroyIcon(info.hIcon);
+            return None;
+        }
+
+        let mut bmi: BITMAPINFO = std::mem::zeroed();
+        bmi.bmiHeader.biSize = std::mem::size_of::<BITMAPINFOHEADER>() as u32;
+        bmi.bmiHeader.biWidth = width;
+        bmi.bmiHeader.biHeight = -height; // request top-down rows
+        bmi.bmiHeader.biPlanes = 1;
+        bmi.bmiHeader.biBitCount = 32;
+        bmi.bmiHeader.biCompression = BI_RGB as u32;
+
+        let mut pixels = vec![0u8; (width as usize) * (height as usize) * 4];
+        let hdc = GetDC(std::ptr::null_mut());
+        let scanlines = GetDIBits(hdc, icon_info.hbmColor as _, 0, height as u32, pixels.as_mut_ptr() as *mut _, &mut bmi, DIB_RGB_COLORS);
+        ReleaseDC(std::ptr::null_mut(), hdc);
+        DeleteObject(icon_info.hbmColor as _);
+        DeleteObject(icon_info.hbmMask as _);
+        DestroyIcon(info.hIcon);
+        let _ = DeleteDC; // Gdi import kept for symmetry with other DC calls
+
+        if scanlines == 0 {
+            return None;
+        }
+
+        // Build a minimal, valid 32bpp BMP file around the pixel data
+        // GetDIBits already gave us in Windows' native BGRA order.
+        let pixel_data_size = pixels.len() as u32;
+        let file_header_size: u32 = 14;
+        let info_header_size: u32 = 40;
+        let file_size = file_header_size + info_header_size + pixel_data_size;
+
+        let mut bmp_bytes = Vec::with_capacity(file_size as usize);
+        bmp_bytes.extend_from_slice(b"BM");
+        bmp_bytes.extend_from_slice(&file_size.to_le_bytes());
+        bmp_bytes.extend_from_slice(&0u16.to_le_bytes());
+        bmp_bytes.extend_from_slice(&0u16.to_le_bytes());
+        bmp_bytes.extend_from_slice(&(file_header_size + info_header_size).to_le_bytes());
+        bmp_bytes.extend_from_slice(&info_header_size.to_le_bytes());
+        bmp_bytes.extend_from_slice(&width.to_le_bytes());
+        bmp_bytes.extend_from_slice(&(-height).to_le_bytes()); // negative = top-down in-file too
+        bmp_bytes.extend_from_slice(&1u16.to_le_bytes());
+        bmp_bytes.extend_from_slice(&32u16.to_le_bytes());
+        bmp_bytes.extend_from_slice(&0u32.to_le_bytes());
+        bmp_bytes.extend_from_slice(&pixel_data_size.to_le_bytes());
+        bmp_bytes.extend_from_slice(&0i32.to_le_bytes());
+        bmp_bytes.extend_from_slice(&0i32.to_le_bytes());
+        bmp_bytes.extend_from_slice(&0u32.to_le_bytes());
+        bmp_bytes.extend_from_slice(&0u32.to_le_bytes());
+        bmp_bytes.extend_from_slice(&pixels);
+
+        use base64::Engine;
+        Some(format!("data:image/bmp;base64,{}", base64::engine::general_purpose::STANDARD.encode(&bmp_bytes)))
+    }
+}
+
+#[cfg(not(windows))]
+fn extract_icon_data_uri(_path: &std::path::Path) -> Option<String> {
+    None
+}
+
+#[tauri::command]
+pub fn launcher_icon(launcher: String) -> Option<String> {
+    let provider = all_providers().into_iter().find(|p| p.id() == launcher)?;
+    let path = provider.icon_source()?;
+    extract_icon_data_uri(&path)
+}
+
+#[tauri::command]
+pub fn game_icon(launcher: String, game_id: String) -> Option<String> {
+    if !is_safe_id(&game_id) {
+        return None;
+    }
+    let provider = all_providers().into_iter().find(|p| p.id() == launcher)?;
+    let path = provider.game_icon_source(&game_id)?;
+    extract_icon_data_uri(&path)
+}
+
+/// Per-launcher detect() + list_games() + running-check, so the frontend
+/// can fire one of these per launcher in parallel and render each as it
+/// finishes rather than waiting for the slowest provider. Returns None for
+/// an undetected launcher (nothing installed) so the frontend can drop it.
+#[tauri::command]
+pub fn provider_data(launcher: String) -> Option<ProviderResult> {
+    let provider = all_providers().into_iter().find(|p| p.id() == launcher)?;
+    if !provider.detect() {
+        return None;
+    }
+    let running = running_process_names();
+    let is_running = provider
+        .process_names()
+        .iter()
+        .any(|name| running.contains(&name.to_ascii_lowercase()));
+    let games = provider.list_games().unwrap_or_default();
+
+    Some(ProviderResult {
+        id: provider.id(),
+        name: provider.display_name(),
+        games,
+        running: is_running,
+    })
 }
 
 /// Rejects anything that isn't a plausible id before it reaches a shell-out

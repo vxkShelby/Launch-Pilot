@@ -134,6 +134,27 @@ impl UbisoftProvider {
         }
         games
     }
+
+    /// Re-finds a Steam-installed game's own install folder by appid, for
+    /// icon lookup — same library-scan logic as `steam_ubisoft_games`,
+    /// factored out since icon lookup only needs the one game, not a list.
+    fn steam_game_dir(appid: &str) -> Option<PathBuf> {
+        let steam_path = Self::steam_path()?;
+        for library in Self::library_paths(&steam_path) {
+            let manifest = library.join("steamapps").join(format!("appmanifest_{appid}.acf"));
+            let Ok(content) = std::fs::read_to_string(&manifest) else {
+                continue;
+            };
+            let Some(root) = vdf::parse(&content) else {
+                continue;
+            };
+            let Some(installdir) = root.get("AppState").and_then(|v| v.as_block()).and_then(|s| s.get("installdir")).and_then(|v| v.as_str()) else {
+                continue;
+            };
+            return Some(library.join("steamapps").join("common").join(installdir));
+        }
+        None
+    }
 }
 
 impl LauncherProvider for UbisoftProvider {
@@ -197,6 +218,35 @@ impl LauncherProvider for UbisoftProvider {
     // (upc.exe also present, the older/legacy name for the same client).
     fn process_names(&self) -> &'static [&'static str] {
         &["UbisoftConnect.exe", "upc.exe"]
+    }
+
+    fn icon_source(&self) -> Option<PathBuf> {
+        let hklm = RegKey::predef(HKEY_LOCAL_MACHINE);
+        let install_dir: String = hklm
+            .open_subkey("SOFTWARE\\WOW6432Node\\Ubisoft\\Launcher")
+            .ok()?
+            .get_value("InstallDir")
+            .ok()?;
+        Some(PathBuf::from(install_dir).join("UbisoftConnect.exe"))
+    }
+
+    // Same disclosed "largest/matching exe in the install folder" heuristic
+    // as Steam, since neither native Ubisoft installs (InstallDir only) nor
+    // the Steam-cross-detected ones (installdir from Steam's own manifest)
+    // give an exact exe filename the way GOG's/EA's registries do.
+    fn game_icon_source(&self, game_id: &str) -> Option<PathBuf> {
+        if let Some(appid) = game_id.strip_prefix("steam-") {
+            return super::find_main_exe(&Self::steam_game_dir(appid)?);
+        }
+        let hklm = RegKey::predef(HKEY_LOCAL_MACHINE);
+        let install_dir: String = hklm
+            .open_subkey("SOFTWARE\\WOW6432Node\\Ubisoft\\Launcher\\Installs")
+            .ok()?
+            .open_subkey(game_id)
+            .ok()?
+            .get_value("InstallDir")
+            .ok()?;
+        super::find_main_exe(&PathBuf::from(install_dir))
     }
 
     fn trigger_update(&self, _game_id: &str) -> Result<(), String> {

@@ -10,7 +10,10 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
         .invoke_handler(tauri::generate_handler![
-            commands::dashboard_data,
+            commands::launcher_ids,
+            commands::launcher_icon,
+            commands::game_icon,
+            commands::provider_data,
             commands::trigger_update
         ])
         .run(tauri::generate_context!())

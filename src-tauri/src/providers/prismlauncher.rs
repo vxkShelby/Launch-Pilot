@@ -160,6 +160,10 @@ impl LauncherProvider for PrismLauncherProvider {
         &["prismlauncher.exe"]
     }
 
+    fn icon_source(&self) -> Option<PathBuf> {
+        self.exe_path()
+    }
+
     fn trigger_update(&self, _game_id: &str) -> Result<(), String> {
         let exe = self.exe_path().ok_or("PrismLauncher not installed")?;
         std::process::Command::new(exe)

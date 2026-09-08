@@ -105,6 +105,10 @@ impl LauncherProvider for AgeOfTheRingProvider {
         &["AotR_Launcher.exe"]
     }
 
+    fn icon_source(&self) -> Option<PathBuf> {
+        self.find_install()
+    }
+
     fn trigger_update(&self, _game_id: &str) -> Result<(), String> {
         let exe = self.find_install().ok_or("Age of the Ring not found")?;
         std::process::Command::new(exe)

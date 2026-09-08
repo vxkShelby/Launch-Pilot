@@ -33,7 +33,7 @@ whether an update is pending, LaunchPilot says **Unknown** instead of guessing.
 | **GOG Galaxy** | ✅ | ✅ | ✅ live (`content-system.gog.com`, no login) | `goggalaxy://openGameView/<id>` |
 | **Riot Client** | ✅ | ✅ (light) | — *(no local field exists)* | launches `RiotClientServices.exe` |
 | **EA app** | ✅ | ✅ (registry) | ✅ live "Updating" (`.tmp` staging files) | `origin2://` (opens client) |
-| **PrismLauncher** | ✅ | ✅ | — *(pinned versions, no update concept)* | launches `prismlauncher.exe` |
+| **PrismLauncher** | ✅ | ✅ | ✅ live (Mojang's public version manifest, no login) | launches `prismlauncher.exe` |
 | **Ubisoft Connect** | ✅ | ✅ (registry + Steam cross-detect) | — *(no local field exists)* | `uplay://` (opens client) |
 | **Battle.net** | ✅ | ✅ (registry, known-product table) | ✅ live "Updating" (log-based) | `battlenet://` (opens client) |
 | **Wargaming Game Center** | ✅ | ✅ (`preferences.xml`) | ✅ (`game_info.xml` installed vs. available) | scans for `wgc.exe` (heuristic) |
@@ -42,6 +42,10 @@ whether an update is pending, LaunchPilot says **Unknown** instead of guessing.
 Steam is the reference implementation — full local visibility into what's installed, what build it's
 on, and whether Valve has a newer one queued. The others get exactly as much automation as their
 local data honestly supports; the rest is one click into the real launcher.
+
+Every launcher and game also shows its real local icon (pulled from Windows' own icon cache for
+that launcher's client exe, or that specific game's own exe/registry-declared icon) — never a
+bundled or guessed image.
 
 ## Dev
 

@@ -163,7 +163,47 @@ impl LauncherProvider for EaProvider {
         &["EADesktop.exe"]
     }
 
+    fn icon_source(&self) -> Option<std::path::PathBuf> {
+        let hklm = RegKey::predef(HKEY_LOCAL_MACHINE);
+        let path: String = hklm
+            .open_subkey("SOFTWARE\\WOW6432Node\\Electronic Arts\\EA Desktop")
+            .ok()?
+            .get_value("ClientPath")
+            .ok()?;
+        Some(std::path::PathBuf::from(path))
+    }
+
     fn trigger_update(&self, _game_id: &str) -> Result<(), String> {
         open::that("origin2://").map_err(|e| e.to_string())
+    }
+
+    // Real, exact per-game icon: the same uninstall registry entries this
+    // provider already reads carry a real DisplayIcon field — verified
+    // live for both installed games ("X:\Origin\The Sims 4\Game\Bin\
+    // TS4_x64.exe", "X:\Origin\Battlefield 6\bf6.exe"), sometimes quoted
+    // and/or with a trailing ",<icon index>" that isn't part of the path.
+    fn game_icon_source(&self, game_id: &str) -> Option<std::path::PathBuf> {
+        let hklm = RegKey::predef(HKEY_LOCAL_MACHINE);
+        for uninstall_path in UNINSTALL_KEYS {
+            let Ok(uninstall_key) = hklm.open_subkey(uninstall_path) else {
+                continue;
+            };
+            for subkey_name in uninstall_key.enum_keys().flatten() {
+                if subkey_name.trim_matches(|c| c == '{' || c == '}') != game_id {
+                    continue;
+                }
+                let Ok(entry) = uninstall_key.open_subkey(&subkey_name) else {
+                    continue;
+                };
+                let icon: String = entry.get_value("DisplayIcon").ok()?;
+                let trimmed = icon.trim_matches('"');
+                let path = match trimmed.rsplit_once(',') {
+                    Some((p, index)) if index.trim().parse::<i32>().is_ok() => p,
+                    _ => trimmed,
+                };
+                return Some(std::path::PathBuf::from(path));
+            }
+        }
+        None
     }
 }

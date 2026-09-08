@@ -121,6 +121,23 @@ impl WargamingProvider {
             last_updated: None,
         })
     }
+
+    // Game Center's client (wgc.exe) has no registry footprint either
+    // (verified: no HKLM uninstall/App Paths entry exists for it on this
+    // machine) — its real location was only found by resolving this
+    // machine's own Desktop shortcut, which pointed at
+    // <drive>:\Wargaming.net\GameCenter\wgc.exe. Same disclosed heuristic
+    // as the Age of the Ring provider: scan drive letters for that path
+    // rather than hardcode this machine's drive letter.
+    fn find_client_exe() -> Option<PathBuf> {
+        for drive in 'C'..='Z' {
+            let candidate = PathBuf::from(format!("{drive}:\\Wargaming.net\\GameCenter\\wgc.exe"));
+            if candidate.exists() {
+                return Some(candidate);
+            }
+        }
+        None
+    }
 }
 
 impl LauncherProvider for WargamingProvider {
@@ -141,23 +158,15 @@ impl LauncherProvider for WargamingProvider {
     }
 
     fn trigger_update(&self, _game_id: &str) -> Result<(), String> {
-        // Game Center's client (wgc.exe) has no registry footprint either
-        // (verified: no HKLM uninstall/App Paths entry exists for it on
-        // this machine) — its real location was only found by resolving
-        // this machine's own Desktop shortcut, which pointed at
-        // <drive>:\Wargaming.net\GameCenter\wgc.exe. Same disclosed
-        // heuristic as the Age of the Ring provider: scan drive letters for
-        // that path rather than hardcode this machine's drive letter.
-        for drive in 'C'..='Z' {
-            let candidate = PathBuf::from(format!("{drive}:\\Wargaming.net\\GameCenter\\wgc.exe"));
-            if candidate.exists() {
-                return std::process::Command::new(candidate).spawn().map(|_| ()).map_err(|e| e.to_string());
-            }
-        }
-        Err("Wargaming Game Center executable not found".to_string())
+        let exe = Self::find_client_exe().ok_or("Wargaming Game Center executable not found")?;
+        std::process::Command::new(exe).spawn().map(|_| ()).map_err(|e| e.to_string())
     }
 
     fn process_names(&self) -> &'static [&'static str] {
         &["wgc.exe"]
+    }
+
+    fn icon_source(&self) -> Option<PathBuf> {
+        Self::find_client_exe()
     }
 }

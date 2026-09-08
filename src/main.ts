@@ -14,15 +14,11 @@ interface Game {
   last_updated: number | null;
 }
 
-interface LauncherInfo {
+interface ProviderResult {
   id: string;
   name: string;
-}
-
-interface DashboardData {
   games: Game[];
-  connected_only: LauncherInfo[];
-  running_launchers: string[];
+  running: boolean;
 }
 
 const STATUS_LABEL: Record<UpdateStatus, string> = {
@@ -51,12 +47,51 @@ const DEFAULT_REFRESH_MINUTES = 30;
 let allGames: Game[] = [];
 let runningLaunchers: Set<string> = new Set();
 let refreshTimer: number | undefined;
+let loadRequestId = 0;
 
 function buildRunningDot(launcher: string): HTMLElement {
   const dot = document.createElement("span");
   dot.className = runningLaunchers.has(launcher) ? "running-dot running-dot-on" : "running-dot running-dot-off";
   dot.title = runningLaunchers.has(launcher) ? "Launcher is running" : "Launcher is not running";
   return dot;
+}
+
+// Real icon Windows itself associates with that launcher's own client exe
+// (fetched via the launcher_icon command) — not a bundled/guessed logo.
+// Undetected-on-this-machine launchers (no verified exe path) just show no
+// icon rather than a placeholder pretending to be one.
+const iconCache = new Map<string, string | null>();
+
+function buildIcon(cacheKey: string, className: string, fetcher: () => Promise<string | null>): HTMLImageElement {
+  const img = document.createElement("img");
+  img.className = className;
+  img.alt = "";
+  img.hidden = true;
+  const cached = iconCache.get(cacheKey);
+  if (cached) {
+    img.src = cached;
+    img.hidden = false;
+  } else if (!iconCache.has(cacheKey)) {
+    fetcher()
+      .catch(() => null)
+      .then((uri) => {
+        iconCache.set(cacheKey, uri);
+        if (uri) {
+          img.src = uri;
+          img.hidden = false;
+        }
+      });
+  }
+  return img;
+}
+
+function buildLauncherIcon(launcher: string): HTMLImageElement {
+  return buildIcon(launcher, "launcher-icon", () => invoke<string | null>("launcher_icon", { launcher }));
+}
+
+function buildGameIcon(game: Game): HTMLImageElement {
+  const cacheKey = `${game.launcher}:${game.id}`;
+  return buildIcon(cacheKey, "game-icon", () => invoke<string | null>("game_icon", { launcher: game.launcher, gameId: game.id }));
 }
 
 function formatSize(bytes: number | null): string {
@@ -74,21 +109,30 @@ function buildGameRow(game: Game): HTMLElement {
   status.className = `status status-${game.status}`;
   status.textContent = STATUS_LABEL[game.status];
 
+  const nameWrap = document.createElement("span");
+  nameWrap.className = "game-name";
   const name = document.createElement("span");
-  name.className = "game-name";
+  name.className = "game-name-text";
   name.textContent = game.name;
-
   const size = document.createElement("span");
   size.className = "game-size";
   size.textContent = formatSize(game.size_bytes);
+  nameWrap.append(buildGameIcon(game), name, size);
 
-  row.append(status, name, size);
+  row.append(status, nameWrap);
 
   if (game.status === "update_available" || game.status === "updating") {
+    // No provider exposes a real "size of this pending update" field
+    // (only the installed game's own size is known) — shown as "—"
+    // rather than reusing size_bytes and implying a download size we
+    // don't actually have.
+    const updateSize = document.createElement("span");
+    updateSize.className = "update-size";
+    updateSize.textContent = formatSize(null);
     const btn = document.createElement("button");
     btn.textContent = "Update";
     btn.onclick = () => invoke("trigger_update", { launcher: game.launcher, gameId: game.id });
-    row.append(btn);
+    row.append(updateSize, btn);
   }
 
   return row;
@@ -104,8 +148,11 @@ function buildLauncherSection(launcher: string, games: Game[]): HTMLElement {
 
   const summary = document.createElement("summary");
   const badge = needsUpdate.length > 0 ? ` (${needsUpdate.length} update${needsUpdate.length === 1 ? "" : "s"})` : "";
+  const totalBytes = games.reduce<number | null>((sum, g) => (g.size_bytes == null ? sum : (sum ?? 0) + g.size_bytes), null);
+  const totalLabel = totalBytes == null ? "" : ` · ${formatSize(totalBytes)}`;
+  summary.appendChild(buildLauncherIcon(launcher));
   summary.appendChild(buildRunningDot(launcher));
-  summary.append(`${LAUNCHER_LABEL[launcher] ?? launcher} — ${games.length} game${games.length === 1 ? "" : "s"}${badge}`);
+  summary.append(`${LAUNCHER_LABEL[launcher] ?? launcher} — ${games.length} game${games.length === 1 ? "" : "s"}${badge}${totalLabel}`);
   section.appendChild(summary);
 
   const body = document.createElement("div");
@@ -148,68 +195,103 @@ function setLastChecked() {
   if (el) el.textContent = `Last checked ${new Date().toLocaleTimeString()}`;
 }
 
+function buildLoadingPlaceholder(launcher: string): HTMLElement {
+  const el = document.createElement("div");
+  el.className = "launcher-loading muted";
+  el.dataset.launcher = launcher;
+  el.textContent = `${LAUNCHER_LABEL[launcher] ?? launcher} — loading…`;
+  return el;
+}
+
+function buildConnectedRow(result: ProviderResult): HTMLElement {
+  const row = document.createElement("div");
+  row.className = "connected-row";
+  row.dataset.launcher = result.id;
+  const name = document.createElement("span");
+  name.appendChild(buildLauncherIcon(result.id));
+  name.appendChild(buildRunningDot(result.id));
+  name.append(LAUNCHER_LABEL[result.id] ?? result.name);
+  const btn = document.createElement("button");
+  btn.textContent = "Open";
+  btn.onclick = () => invoke("trigger_update", { launcher: result.id, gameId: "" });
+  row.append(name, btn);
+  return row;
+}
+
+function ensureConnectedSection(listEl: HTMLElement): HTMLElement {
+  let section = listEl.querySelector<HTMLElement>(".connected-only");
+  if (!section) {
+    section = document.createElement("div");
+    section.className = "connected-only";
+    const heading = document.createElement("p");
+    heading.className = "muted";
+    heading.textContent = "Connected (no game list available):";
+    section.appendChild(heading);
+    listEl.appendChild(section);
+  }
+  return section;
+}
+
+// Loads each launcher independently and renders it the moment it resolves,
+// instead of one big call that makes every launcher wait behind whichever
+// provider is slowest (a big Steam library, GOG's network round-trip).
 async function loadGames() {
   const listEl = document.querySelector<HTMLElement>("#game-list");
   if (!listEl) return;
+  const requestId = ++loadRequestId;
 
-  let data: DashboardData;
+  let ids: string[];
   try {
-    data = await invoke<DashboardData>("dashboard_data");
+    ids = await invoke<string[]>("launcher_ids");
   } catch (err) {
-    listEl.textContent = `Failed to list games: ${err}`;
+    listEl.textContent = `Failed to list launchers: ${err}`;
     return;
   }
-  allGames = data.games;
-  runningLaunchers = new Set(data.running_launchers);
+  if (requestId !== loadRequestId) return;
 
+  allGames = [];
+  runningLaunchers = new Set();
+  listEl.innerHTML = "";
   updateStats();
-  setLastChecked();
 
-  if (allGames.length === 0) {
-    listEl.textContent = "No games found (no supported launcher detected, or none installed).";
-  } else {
-    const byLauncher = new Map<string, Game[]>();
-    for (const game of allGames) {
-      const list = byLauncher.get(game.launcher) ?? [];
-      list.push(game);
-      byLauncher.set(game.launcher, list);
-    }
-
-    listEl.innerHTML = "";
-    for (const [launcher, launcherGames] of byLauncher) {
-      launcherGames.sort((a, b) => a.name.localeCompare(b.name));
-      listEl.appendChild(buildLauncherSection(launcher, launcherGames));
-    }
+  const placeholders = new Map<string, HTMLElement>();
+  for (const id of ids) {
+    const placeholder = buildLoadingPlaceholder(id);
+    placeholders.set(id, placeholder);
+    listEl.appendChild(placeholder);
   }
 
-  renderConnectedOnly(listEl, data.connected_only);
-  applySearchFilter();
-}
+  let settled = 0;
+  ids.forEach((id) => {
+    invoke<ProviderResult | null>("provider_data", { launcher: id })
+      .catch(() => null)
+      .then((result) => {
+        if (requestId !== loadRequestId) return;
+        settled += 1;
 
-function renderConnectedOnly(listEl: HTMLElement, launchers: LauncherInfo[]) {
-  if (launchers.length === 0) return;
+        const placeholder = placeholders.get(id);
+        if (result && result.running) runningLaunchers.add(id);
 
-  const section = document.createElement("div");
-  section.className = "connected-only";
-  const heading = document.createElement("p");
-  heading.className = "muted";
-  heading.textContent = "Connected (no game list available):";
-  section.appendChild(heading);
+        if (!result) {
+          placeholder?.remove();
+        } else if (result.games.length === 0) {
+          placeholder?.remove();
+          ensureConnectedSection(listEl).appendChild(buildConnectedRow(result));
+        } else {
+          const games = [...result.games].sort((a, b) => a.name.localeCompare(b.name));
+          allGames.push(...games);
+          placeholder?.replaceWith(buildLauncherSection(id, games));
+        }
 
-  launchers.forEach((launcher) => {
-    const row = document.createElement("div");
-    row.className = "connected-row";
-    const name = document.createElement("span");
-    name.appendChild(buildRunningDot(launcher.id));
-    name.append(LAUNCHER_LABEL[launcher.id] ?? launcher.name);
-    const btn = document.createElement("button");
-    btn.textContent = "Open";
-    btn.onclick = () => invoke("trigger_update", { launcher: launcher.id, gameId: "" });
-    row.append(name, btn);
-    section.appendChild(row);
+        updateStats();
+        setLastChecked();
+        applySearchFilter();
+
+        if (settled === ids.length && allGames.length === 0 && listEl.querySelector(".connected-only") === null) {
+          listEl.textContent = "No games found (no supported launcher detected, or none installed).";
+        }
+      });
   });
-
-  listEl.appendChild(section);
 }
 
 function applySearchFilter() {

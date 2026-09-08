@@ -157,6 +157,19 @@ impl LauncherProvider for BattleNetProvider {
         &["Battle.net.exe"]
     }
 
+    fn icon_source(&self) -> Option<std::path::PathBuf> {
+        let hklm = RegKey::predef(HKEY_LOCAL_MACHINE);
+        let icon_value: String = hklm
+            .open_subkey("SOFTWARE\\WOW6432Node\\Blizzard Entertainment\\Battle.net\\Capabilities")
+            .ok()?
+            .get_value("ApplicationIcon")
+            .ok()?;
+        // Real value looks like "X:\Battle.net\Battle.net.exe,0" — the
+        // icon-index suffix isn't a valid path component.
+        let path = icon_value.rsplit_once(',').map(|(p, _)| p).unwrap_or(&icon_value);
+        Some(std::path::PathBuf::from(path))
+    }
+
     fn trigger_update(&self, _game_id: &str) -> Result<(), String> {
         open::that("battlenet://").map_err(|e| e.to_string())
     }

@@ -51,6 +51,55 @@ pub trait LauncherProvider: Send + Sync {
     fn process_names(&self) -> &'static [&'static str] {
         &[]
     }
+    /// Real local path to this launcher's own client exe (or a registry
+    /// DisplayIcon-style file), used only to pull its actual icon for
+    /// display — never guessed/hardcoded to a value not backed by a
+    /// registry read or a path this provider already resolves elsewhere.
+    /// None means "no verified path available," not "no icon exists."
+    fn icon_source(&self) -> Option<std::path::PathBuf> {
+        None
+    }
+    /// Real local exe path to use for one specific game's icon (re-derived
+    /// per request rather than cached in `Game`, so a payload with many
+    /// games doesn't have to carry a path for every one of them up front).
+    /// None means "no verified path for this game," not "no icon exists."
+    fn game_icon_source(&self, _game_id: &str) -> Option<std::path::PathBuf> {
+        None
+    }
+}
+
+/// Disclosed heuristic shared by providers that know a game's install
+/// folder but not its exact main exe (Steam's manifest gives an installdir,
+/// never a launch exe; native Ubisoft installs are the same) — prefers an
+/// exe whose filename matches the folder name (the common convention for
+/// single-exe games), falling back to the largest top-level .exe, skipping
+/// known non-game utility exes. Not exact for every multi-exe install, but
+/// it's still a real local file's real icon, not a guess at what the icon
+/// looks like.
+pub fn find_main_exe(dir: &std::path::Path) -> Option<std::path::PathBuf> {
+    let folder_name = dir.file_name()?.to_str()?.to_ascii_lowercase();
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return None;
+    };
+    const SKIP_PREFIXES: &[&str] = &["unins", "vc_redist", "dxwebsetup", "dotnetfx", "directx"];
+
+    let mut candidates: Vec<(std::path::PathBuf, u64)> = Vec::new();
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.extension().and_then(|e| e.to_str()).map(|e| e.eq_ignore_ascii_case("exe")) != Some(true) {
+            continue;
+        }
+        let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("").to_ascii_lowercase();
+        if SKIP_PREFIXES.iter().any(|p| stem.starts_with(p)) {
+            continue;
+        }
+        if stem == folder_name {
+            return Some(path);
+        }
+        let size = entry.metadata().map(|m| m.len()).unwrap_or(0);
+        candidates.push((path, size));
+    }
+    candidates.into_iter().max_by_key(|(_, size)| *size).map(|(path, _)| path)
 }
 
 pub fn all_providers() -> Vec<Box<dyn LauncherProvider>> {

@@ -146,6 +146,40 @@ impl LauncherProvider for SteamProvider {
         &["steam.exe"]
     }
 
+    fn icon_source(&self) -> Option<PathBuf> {
+        Some(self.steam_path()?.join("steam.exe"))
+    }
+
+    // Steam's own manifest gives an installdir but never a launch exe
+    // (that lives in localconfig.vdf's launch options, a much messier
+    // per-user file) — same disclosed "matching/largest exe" heuristic
+    // used for Ubisoft, applied to the real install folder.
+    fn game_icon_source(&self, game_id: &str) -> Option<PathBuf> {
+        let steam_path = self.steam_path()?;
+        for library in self.library_paths(&steam_path) {
+            let manifest = library.join("steamapps").join(format!("appmanifest_{game_id}.acf"));
+            let Ok(content) = std::fs::read_to_string(&manifest) else {
+                continue;
+            };
+            let Some(root) = crate::vdf::parse(&content) else {
+                continue;
+            };
+            let Some(installdir) = root
+                .get("AppState")
+                .and_then(|v| v.as_block())
+                .and_then(|s| s.get("installdir"))
+                .and_then(|v| v.as_str())
+            else {
+                continue;
+            };
+            let game_dir = library.join("steamapps").join("common").join(installdir);
+            if let Some(exe) = super::find_main_exe(&game_dir) {
+                return Some(exe);
+            }
+        }
+        None
+    }
+
     fn trigger_update(&self, game_id: &str) -> Result<(), String> {
         // No public "force update" API exists for Steam. steam://validate
         // is Valve's own documented mechanism for re-verifying a game's
