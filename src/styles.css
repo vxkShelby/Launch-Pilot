@@ -204,8 +204,9 @@ button:disabled {
 }
 
 .status-update_available {
-  background: #3a2418;
-  color: #ffb454;
+  background: #1f2e10;
+  color: #a6e22e;
+  font-weight: 600;
 }
 
 .status-updating {

@@ -32,15 +32,19 @@
 // Bug fix, verified live: the .tmp file's mere *presence* is not "active
 // right now" — pausing a download in EA Desktop leaves the same partial
 // .tmp file sitting on disk untouched, so the old presence-only check kept
-// reporting "Updating" for a paused download indefinitely. Confirmed on
-// this machine: pausing Battlefield 6's update left deps.tmp in place with
-// its LastWriteTime frozen at the pause moment. Fixed by requiring the file
-// to have been written within the last 10 seconds — a download actively
-// streaming bytes touches its .tmp file continuously, a paused one doesn't.
+// reporting "Updating" forever. Confirmed on this machine: pausing
+// Battlefield 6's update left deps.tmp in place with its LastWriteTime
+// frozen at the pause moment. Fixed by splitting the one real signal into
+// two states instead of collapsing a paused download into "Unknown": a
+// .tmp file written in the last 10 seconds means a download is actively
+// streaming bytes right now (Updating); a .tmp file that exists but is
+// stale means an update was started and is sitting there incomplete —
+// paused or stalled, not finished — which is exactly what UpdateAvailable
+// means elsewhere in this app (pending, not yet done).
 //
 // Update status otherwise: DisplayVersion is the *installed* version, not
 // something we can compare against a "latest available" — there's no local
-// field for that. Honest Unknown when nothing is actively updating.
+// field for that. Honest Unknown when no .tmp exists at all.
 use super::{Game, LauncherProvider, UpdateStatus};
 use winreg::enums::HKEY_LOCAL_MACHINE;
 use winreg::RegKey;
@@ -53,9 +57,13 @@ const UNINSTALL_KEYS: [&str; 2] = [
 pub struct EaProvider;
 
 impl EaProvider {
-    fn is_updating(display_name: &str) -> bool {
+    /// Real local signal: a *.tmp staging file in the game's InstallData
+    /// folder means a download/apply is pending. Whether it's actively
+    /// streaming right now (Updating) or sitting there paused/stalled
+    /// (UpdateAvailable) is told apart by how recently it was written to.
+    fn update_status_from_tmp(display_name: &str) -> UpdateStatus {
         let Ok(program_data) = std::env::var("ProgramData") else {
-            return false;
+            return UpdateStatus::Unknown;
         };
         let folder_name: String = display_name.chars().filter(|c| *c != '\u{2122}' && *c != '\u{00AE}').collect();
         let install_data = std::path::PathBuf::from(program_data)
@@ -63,28 +71,35 @@ impl EaProvider {
             .join(folder_name.trim());
 
         let Ok(components) = std::fs::read_dir(&install_data) else {
-            return false;
+            return UpdateStatus::Unknown;
         };
         const ACTIVE_WINDOW: std::time::Duration = std::time::Duration::from_secs(10);
         let now = std::time::SystemTime::now();
 
+        let mut found_pending = false;
         for component in components.flatten() {
             let Ok(files) = std::fs::read_dir(component.path()) else {
                 continue;
             };
-            let is_actively_written = files
-                .flatten()
-                .filter(|f| f.path().extension().and_then(|e| e.to_str()) == Some("tmp"))
-                .any(|f| {
-                    f.metadata()
-                        .and_then(|m| m.modified())
-                        .is_ok_and(|modified| now.duration_since(modified).is_ok_and(|age| age < ACTIVE_WINDOW))
-                });
-            if is_actively_written {
-                return true;
+            for f in files.flatten() {
+                if f.path().extension().and_then(|e| e.to_str()) != Some("tmp") {
+                    continue;
+                }
+                found_pending = true;
+                let is_actively_written = f
+                    .metadata()
+                    .and_then(|m| m.modified())
+                    .is_ok_and(|modified| now.duration_since(modified).is_ok_and(|age| age < ACTIVE_WINDOW));
+                if is_actively_written {
+                    return UpdateStatus::Updating;
+                }
             }
         }
-        false
+        if found_pending {
+            UpdateStatus::UpdateAvailable
+        } else {
+            UpdateStatus::Unknown
+        }
     }
 }
 
@@ -125,11 +140,7 @@ impl LauncherProvider for EaProvider {
                     continue;
                 }
                 let version: Option<String> = entry.get_value("DisplayVersion").ok();
-                let status = if Self::is_updating(&name) {
-                    UpdateStatus::Updating
-                } else {
-                    UpdateStatus::Unknown
-                };
+                let status = Self::update_status_from_tmp(&name);
 
                 games.push(Game {
                     launcher: "ea",

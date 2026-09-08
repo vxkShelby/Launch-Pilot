@@ -2018,7 +2018,7 @@ dependencies = [
 
 [[package]]
 name = "launchpilot"
-version = "0.4.1"
+version = "0.4.2"
 dependencies = [
  "open",
  "quick-xml",

@@ -1,6 +1,6 @@
 [package]
 name = "launchpilot"
-version = "0.4.1"
+version = "0.4.2"
 description = "Unified game-launcher update manager"
 authors = ["mmedv"]
 edition = "2021"
