@@ -26,3 +26,47 @@ h1 {
 .muted {
   color: #7a8296;
 }
+
+#game-list {
+  margin-top: 1.5rem;
+}
+
+.game-row {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.5rem 0;
+  border-bottom: 1px solid #1e222e;
+}
+
+.game-name {
+  flex: 1;
+}
+
+.game-size {
+  color: #7a8296;
+  font-variant-numeric: tabular-nums;
+}
+
+.status {
+  font-size: 0.8rem;
+  padding: 0.15rem 0.5rem;
+  border-radius: 4px;
+  width: 8.5rem;
+  text-align: center;
+}
+
+.status-up_to_date {
+  background: #16301f;
+  color: #6ee7ff;
+}
+
+.status-update_available {
+  background: #3a2418;
+  color: #ffb454;
+}
+
+.status-unknown {
+  background: #1e2230;
+  color: #7a8296;
+}

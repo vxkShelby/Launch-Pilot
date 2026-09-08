@@ -2018,8 +2018,9 @@ dependencies = [
 
 [[package]]
 name = "launchpilot"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
+ "open",
  "serde",
  "serde_json",
  "tauri",
@@ -2027,6 +2028,7 @@ dependencies = [
  "tauri-plugin-opener",
  "tauri-plugin-process",
  "tauri-plugin-updater",
+ "winreg",
 ]
 
 [[package]]
