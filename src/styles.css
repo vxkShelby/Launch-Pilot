@@ -11,24 +11,112 @@
 
 body {
   margin: 0;
-}
-
-.container {
-  padding: 3rem 2rem;
-}
-
-h1 {
-  margin: 0 0 0.25rem;
-  font-weight: 600;
-  letter-spacing: 0.02em;
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
 }
 
 .muted {
   color: #7a8296;
 }
 
+.topbar {
+  display: flex;
+  align-items: center;
+  gap: 1.25rem;
+  padding: 0.75rem 1.5rem;
+  border-bottom: 1px solid #1e222e;
+  background: #12151d;
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+
+.brand {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+}
+
+.brand h1 {
+  margin: 0;
+  font-size: 1.1rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.version {
+  font-size: 0.75rem;
+}
+
+.stats {
+  font-size: 0.85rem;
+}
+
+.controls {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+#search {
+  background: #1a1e29;
+  border: 1px solid #262c3d;
+  border-radius: 5px;
+  color: #d8dce6;
+  padding: 0.35rem 0.6rem;
+  font-size: 0.85rem;
+  width: 12rem;
+}
+
+#search:focus {
+  outline: 1px solid #6ee7ff;
+}
+
+button {
+  background: #1a1e29;
+  border: 1px solid #262c3d;
+  border-radius: 5px;
+  color: #d8dce6;
+  padding: 0.35rem 0.7rem;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+button:hover {
+  border-color: #3a4056;
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+#update-all-btn {
+  background: #3a2418;
+  border-color: #5a3a24;
+  color: #ffb454;
+  font-weight: 600;
+}
+
+.icon-btn {
+  padding: 0.35rem 0.5rem;
+  font-size: 1rem;
+  line-height: 1;
+}
+
+.container {
+  padding: 1.5rem 2rem;
+  flex: 1;
+}
+
+#update-status:empty {
+  display: none;
+}
+
 #game-list {
-  margin-top: 1.5rem;
+  margin-top: 0.5rem;
 }
 
 .launcher-section {
@@ -138,4 +226,50 @@ h1 {
 
 .connected-row span {
   flex: 1;
+}
+
+.settings-panel {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2;
+}
+
+.settings-card {
+  background: #171b26;
+  border: 1px solid #262c3d;
+  border-radius: 8px;
+  padding: 1.25rem 1.5rem;
+  min-width: 20rem;
+}
+
+.settings-card h2 {
+  margin: 0 0 1rem;
+  font-size: 1rem;
+}
+
+.settings-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1.25rem;
+  font-size: 0.9rem;
+}
+
+.settings-row select {
+  background: #1a1e29;
+  border: 1px solid #262c3d;
+  border-radius: 5px;
+  color: #d8dce6;
+  padding: 0.3rem 0.5rem;
+}
+
+.statusbar {
+  padding: 0.5rem 1.5rem;
+  border-top: 1px solid #1e222e;
+  font-size: 0.8rem;
 }
