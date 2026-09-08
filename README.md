@@ -6,7 +6,7 @@
 
 **One dashboard for every game launcher on your PC.**
 
-See what needs updating across Steam, Epic, GOG, EA, Ubisoft Connect, Battle.net, and Riot — and trigger updates without opening seven different apps.
+See what needs updating across Steam, Epic, GOG, EA, Ubisoft Connect, Battle.net, Riot, and PrismLauncher — and trigger updates without opening eight different apps.
 
 [![release](https://img.shields.io/github/v/release/vxkShelby/Launch-Pilot?label=release)](https://github.com/vxkShelby/Launch-Pilot/releases/latest)
 [![release workflow](https://github.com/vxkShelby/Launch-Pilot/actions/workflows/release.yml/badge.svg)](https://github.com/vxkShelby/Launch-Pilot/actions/workflows/release.yml)
@@ -32,7 +32,8 @@ whether an update is pending, LaunchPilot says **Unknown** instead of guessing.
 | **Epic Games** | ✅ | ✅ | — *(no local field exists)* | `com.epicgames.launcher://apps/<id>` |
 | **GOG Galaxy** | ✅ | ✅ | — *(no local field exists)* | `goggalaxy://openGameView/<id>` |
 | **Riot Client** | ✅ | ✅ (light) | — *(no local field exists)* | launches `RiotClientServices.exe` |
-| **EA app** | ✅ | — *(format not verified)* | — | `origin2://` (opens client) |
+| **EA app** | ✅ | ✅ (registry) | — *(no local field exists)* | `origin2://` (opens client) |
+| **PrismLauncher** | ✅ | ✅ | — *(pinned versions, no update concept)* | launches `prismlauncher.exe` |
 | **Ubisoft Connect** | ✅ | — *(format not verified)* | — | `uplay://` (opens client) |
 | **Battle.net** | ✅ | — *(format not verified)* | — | `battlenet://` (opens client) |
 

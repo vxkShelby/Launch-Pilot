@@ -2,6 +2,7 @@ pub mod battlenet;
 pub mod ea;
 pub mod epic;
 pub mod gog;
+pub mod prismlauncher;
 pub mod riot;
 pub mod steam;
 pub mod ubisoft;
@@ -47,5 +48,6 @@ pub fn all_providers() -> Vec<Box<dyn LauncherProvider>> {
         Box::new(ubisoft::UbisoftProvider),
         Box::new(battlenet::BattleNetProvider),
         Box::new(riot::RiotProvider),
+        Box::new(prismlauncher::PrismLauncherProvider),
     ]
 }

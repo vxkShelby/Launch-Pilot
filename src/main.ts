@@ -38,6 +38,7 @@ const LAUNCHER_LABEL: Record<string, string> = {
   ubisoft: "Ubisoft Connect",
   battlenet: "Battle.net",
   riot: "Riot Client",
+  prismlauncher: "PrismLauncher",
 };
 
 const REFRESH_INTERVAL_KEY = "lp.refreshIntervalMinutes";
