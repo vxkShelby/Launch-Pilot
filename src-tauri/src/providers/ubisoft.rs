@@ -192,6 +192,13 @@ impl LauncherProvider for UbisoftProvider {
         Ok(games)
     }
 
+    // Verified live: this machine's install folder (from the registry's own
+    // InstallDir) has UbisoftConnect.exe as the current main executable
+    // (upc.exe also present, the older/legacy name for the same client).
+    fn process_names(&self) -> &'static [&'static str] {
+        &["UbisoftConnect.exe", "upc.exe"]
+    }
+
     fn trigger_update(&self, _game_id: &str) -> Result<(), String> {
         open::that("uplay://").map_err(|e| e.to_string())
     }

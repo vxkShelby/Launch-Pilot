@@ -13,15 +13,33 @@
 // also just PrismLauncher's own documented format, since it's open source —
 // nothing here is reverse-engineered guesswork).
 //
-// Update status: instances are versions the user deliberately pinned, not
-// something with a "pending update" concept the way a game install has —
-// honest Unknown/not-applicable, same treatment as Epic's manifests.
+// Update status: instances are versions the user deliberately pinned, so
+// "outdated" isn't quite right — but whether a newer Minecraft release
+// exists at all is real, public, verifiable data: Mojang's own
+// version_manifest_v2.json (launchermeta.mojang.com/mc/game/
+// version_manifest_v2.json) is documented, auth-free, and was fetched live
+// during development (returned real current `latest.release`, e.g. "26.2").
+// Instances pinned to net.minecraft's cachedVersion (already read below)
+// that don't match that latest release are reported as UpdateAvailable —
+// "a newer release exists," not "you must update," since pinning an old
+// version is often deliberate (mod compatibility). Best-effort: any
+// network failure falls back to honest Unknown, same as GOG.
 // No verified per-instance deep link exists, so trigger_update just opens
 // the launcher itself.
 use super::{Game, LauncherProvider, UpdateStatus};
 use crate::ini;
 use serde::Deserialize;
 use std::path::PathBuf;
+
+#[derive(Deserialize)]
+struct VersionManifest {
+    latest: LatestVersions,
+}
+
+#[derive(Deserialize)]
+struct LatestVersions {
+    release: String,
+}
 
 #[derive(Deserialize)]
 struct MmcPack {
@@ -69,6 +87,20 @@ impl PrismLauncherProvider {
         let local_appdata = std::env::var("LOCALAPPDATA").ok()?;
         Some(PathBuf::from(local_appdata).join("Programs\\PrismLauncher\\prismlauncher.exe"))
     }
+
+    fn latest_minecraft_release() -> Option<String> {
+        let client = reqwest::blocking::Client::builder()
+            .timeout(std::time::Duration::from_secs(4))
+            .build()
+            .ok()?;
+        let manifest: VersionManifest = client
+            .get("https://launchermeta.mojang.com/mc/game/version_manifest_v2.json")
+            .send()
+            .ok()?
+            .json()
+            .ok()?;
+        Some(manifest.latest.release)
+    }
 }
 
 impl LauncherProvider for PrismLauncherProvider {
@@ -90,6 +122,8 @@ impl LauncherProvider for PrismLauncherProvider {
             return Ok(Vec::new());
         };
 
+        let latest_release = Self::latest_minecraft_release();
+
         let mut games = Vec::new();
         for entry in entries.flatten() {
             let path = entry.path();
@@ -101,18 +135,29 @@ impl LauncherProvider for PrismLauncherProvider {
             let dir_name = path.file_name().and_then(|f| f.to_str()).unwrap_or("instance").to_string();
             let name = cfg.get("name").cloned().unwrap_or_else(|| dir_name.clone());
             let last_played_ms: Option<u64> = cfg.get("lastLaunchTime").and_then(|s| s.parse().ok());
+            let installed_version = Self::minecraft_version(&path);
+
+            let status = match (&installed_version, &latest_release) {
+                (Some(installed), Some(latest)) if installed != latest => UpdateStatus::UpdateAvailable,
+                (Some(_), Some(_)) => UpdateStatus::UpToDate,
+                _ => UpdateStatus::Unknown,
+            };
 
             games.push(Game {
                 launcher: "prismlauncher",
                 id: dir_name,
                 name,
-                installed_build: Self::minecraft_version(&path),
-                status: UpdateStatus::Unknown,
+                installed_build: installed_version,
+                status,
                 size_bytes: None,
                 last_updated: last_played_ms.map(|ms| ms / 1000),
             });
         }
         Ok(games)
+    }
+
+    fn process_names(&self) -> &'static [&'static str] {
+        &["prismlauncher.exe"]
     }
 
     fn trigger_update(&self, _game_id: &str) -> Result<(), String> {

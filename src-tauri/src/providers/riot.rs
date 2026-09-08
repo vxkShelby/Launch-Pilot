@@ -73,6 +73,10 @@ impl LauncherProvider for RiotProvider {
             .collect())
     }
 
+    fn process_names(&self) -> &'static [&'static str] {
+        &["RiotClientServices.exe"]
+    }
+
     fn trigger_update(&self, _game_id: &str) -> Result<(), String> {
         let exe = self.client_exe().ok_or("Riot Client not installed")?;
         std::process::Command::new(exe)

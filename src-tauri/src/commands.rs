@@ -15,6 +15,39 @@ pub struct DashboardData {
     /// detect+deep-link for that launcher. Lets the dashboard show
     /// "connected, open it yourself" instead of silently omitting them.
     pub connected_only: Vec<LauncherInfo>,
+    /// Ids of installed launchers whose own client process is running
+    /// right now, from a single real `tasklist` snapshot — a launcher
+    /// being installed doesn't mean it's open.
+    pub running_launchers: Vec<&'static str>,
+}
+
+/// Real, single Windows process snapshot via the built-in `tasklist` tool
+/// (no extra dependency, works on any Windows install) — one call covers
+/// every provider instead of spawning a process per launcher.
+///
+/// Tried and reverted: gating this on "owns a visible top-level window"
+/// (via EnumWindows/IsWindowVisible) to fix a real false positive — Ubisoft
+/// Connect's `upc.exe` stays alive as a backgrounded/tray process after the
+/// user closes the client, so process-presence alone reports it as running
+/// when it isn't. But verified live with a raw EnumWindows dump that this
+/// doesn't actually distinguish the cases: Steam, while genuinely open but
+/// minimized to tray, owns only the exact same shape of window — hidden
+/// (IsWindowVisible=false), with a real title ("Steam" / "Ubisoft
+/// Connect"). Windows doesn't expose a reliable "is this a real closed
+/// client vs. minimized-to-tray" signal short of parsing the notification
+/// area itself, which is out of scope. Reverted to plain process presence:
+/// correct for every launcher tested except Ubisoft Connect's tray-resident
+/// helper, a disclosed known limitation rather than a fragile heuristic
+/// that broke Steam to partially fix Ubisoft.
+fn running_process_names() -> std::collections::HashSet<String> {
+    let Ok(output) = std::process::Command::new("tasklist").arg("/FO").arg("CSV").arg("/NH").output() else {
+        return std::collections::HashSet::new();
+    };
+    let text = String::from_utf8_lossy(&output.stdout);
+    text.lines()
+        .filter_map(|line| line.split(',').next())
+        .map(|name| name.trim_matches('"').to_ascii_lowercase())
+        .collect()
 }
 
 /// Single pass over all providers — detect() and list_games() run exactly
@@ -23,10 +56,19 @@ pub struct DashboardData {
 pub fn dashboard_data() -> DashboardData {
     let mut games = Vec::new();
     let mut connected_only = Vec::new();
+    let mut running_launchers = Vec::new();
+    let running = running_process_names();
 
     for provider in all_providers() {
         if !provider.detect() {
             continue;
+        }
+        if provider
+            .process_names()
+            .iter()
+            .any(|name| running.contains(&name.to_ascii_lowercase()))
+        {
+            running_launchers.push(provider.id());
         }
         match provider.list_games() {
             Ok(found) if !found.is_empty() => games.extend(found),
@@ -37,7 +79,7 @@ pub fn dashboard_data() -> DashboardData {
         }
     }
 
-    DashboardData { games, connected_only }
+    DashboardData { games, connected_only, running_launchers }
 }
 
 /// Rejects anything that isn't a plausible id before it reaches a shell-out

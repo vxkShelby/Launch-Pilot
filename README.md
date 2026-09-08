@@ -30,7 +30,7 @@ whether an update is pending, LaunchPilot says **Unknown** instead of guessing.
 |---|:---:|:---:|:---:|---|
 | **Steam** | ✅ | ✅ | ✅ (`StateFlags` + buildid) | `steam://validate/<appid>` |
 | **Epic Games** | ✅ | ✅ | — *(no local field exists)* | `com.epicgames.launcher://apps/<id>` |
-| **GOG Galaxy** | ✅ | ✅ | — *(no local field exists)* | `goggalaxy://openGameView/<id>` |
+| **GOG Galaxy** | ✅ | ✅ | ✅ live (`content-system.gog.com`, no login) | `goggalaxy://openGameView/<id>` |
 | **Riot Client** | ✅ | ✅ (light) | — *(no local field exists)* | launches `RiotClientServices.exe` |
 | **EA app** | ✅ | ✅ (registry) | ✅ live "Updating" (`.tmp` staging files) | `origin2://` (opens client) |
 | **PrismLauncher** | ✅ | ✅ | — *(pinned versions, no update concept)* | launches `prismlauncher.exe` |

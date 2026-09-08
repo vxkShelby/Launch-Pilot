@@ -230,8 +230,30 @@ button:disabled {
   padding: 0.4rem 0;
 }
 
-.connected-row span {
+.connected-row > span {
   flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.running-dot {
+  display: inline-block;
+  width: 0.5rem;
+  height: 0.5rem;
+  min-width: 0.5rem;
+  border-radius: 50%;
+  flex: none;
+  margin-right: 0.5rem;
+}
+
+.running-dot-on {
+  background: #6ee76e;
+  box-shadow: 0 0 4px #6ee76e;
+}
+
+.running-dot-off {
+  background: #5a3030;
 }
 
 .settings-panel {

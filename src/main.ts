@@ -22,6 +22,7 @@ interface LauncherInfo {
 interface DashboardData {
   games: Game[];
   connected_only: LauncherInfo[];
+  running_launchers: string[];
 }
 
 const STATUS_LABEL: Record<UpdateStatus, string> = {
@@ -48,7 +49,15 @@ const REFRESH_INTERVAL_KEY = "lp.refreshIntervalMinutes";
 const DEFAULT_REFRESH_MINUTES = 30;
 
 let allGames: Game[] = [];
+let runningLaunchers: Set<string> = new Set();
 let refreshTimer: number | undefined;
+
+function buildRunningDot(launcher: string): HTMLElement {
+  const dot = document.createElement("span");
+  dot.className = runningLaunchers.has(launcher) ? "running-dot running-dot-on" : "running-dot running-dot-off";
+  dot.title = runningLaunchers.has(launcher) ? "Launcher is running" : "Launcher is not running";
+  return dot;
+}
 
 function formatSize(bytes: number | null): string {
   if (bytes == null) return "—";
@@ -95,7 +104,8 @@ function buildLauncherSection(launcher: string, games: Game[]): HTMLElement {
 
   const summary = document.createElement("summary");
   const badge = needsUpdate.length > 0 ? ` (${needsUpdate.length} update${needsUpdate.length === 1 ? "" : "s"})` : "";
-  summary.textContent = `${LAUNCHER_LABEL[launcher] ?? launcher} — ${games.length} game${games.length === 1 ? "" : "s"}${badge}`;
+  summary.appendChild(buildRunningDot(launcher));
+  summary.append(`${LAUNCHER_LABEL[launcher] ?? launcher} — ${games.length} game${games.length === 1 ? "" : "s"}${badge}`);
   section.appendChild(summary);
 
   const body = document.createElement("div");
@@ -150,6 +160,7 @@ async function loadGames() {
     return;
   }
   allGames = data.games;
+  runningLaunchers = new Set(data.running_launchers);
 
   updateStats();
   setLastChecked();
@@ -189,7 +200,8 @@ function renderConnectedOnly(listEl: HTMLElement, launchers: LauncherInfo[]) {
     const row = document.createElement("div");
     row.className = "connected-row";
     const name = document.createElement("span");
-    name.textContent = LAUNCHER_LABEL[launcher.id] ?? launcher.name;
+    name.appendChild(buildRunningDot(launcher.id));
+    name.append(LAUNCHER_LABEL[launcher.id] ?? launcher.name);
     const btn = document.createElement("button");
     btn.textContent = "Open";
     btn.onclick = () => invoke("trigger_update", { launcher: launcher.id, gameId: "" });

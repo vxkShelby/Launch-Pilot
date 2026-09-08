@@ -90,6 +90,15 @@ impl LauncherProvider for EpicProvider {
         Ok(games)
     }
 
+    // NOT verified locally — Epic Games Launcher isn't installed on this
+    // machine. CORROBORATED: its own installer registers the process as
+    // "EpicGamesLauncher.exe" — the same name Epic uses in its own
+    // launcher's window title and multiple third-party tools (e.g.
+    // Legendary's Windows helper scripts) match against.
+    fn process_names(&self) -> &'static [&'static str] {
+        &["EpicGamesLauncher.exe"]
+    }
+
     fn trigger_update(&self, game_id: &str) -> Result<(), String> {
         open::that(format!(
             "com.epicgames.launcher://apps/{game_id}?action=launch&silent=true"

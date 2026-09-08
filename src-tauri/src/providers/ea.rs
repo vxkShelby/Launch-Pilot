@@ -156,6 +156,13 @@ impl LauncherProvider for EaProvider {
         Ok(games)
     }
 
+    // Verified live on this machine: HKLM\...\EA Desktop\ClientPath resolves
+    // to "...\EA Desktop\EADesktop.exe", and `tasklist` while the client was
+    // actually running showed exactly that image name.
+    fn process_names(&self) -> &'static [&'static str] {
+        &["EADesktop.exe"]
+    }
+
     fn trigger_update(&self, _game_id: &str) -> Result<(), String> {
         open::that("origin2://").map_err(|e| e.to_string())
     }

@@ -142,6 +142,10 @@ impl LauncherProvider for SteamProvider {
         Ok(games)
     }
 
+    fn process_names(&self) -> &'static [&'static str] {
+        &["steam.exe"]
+    }
+
     fn trigger_update(&self, game_id: &str) -> Result<(), String> {
         // No public "force update" API exists for Steam. steam://validate
         // is Valve's own documented mechanism for re-verifying a game's

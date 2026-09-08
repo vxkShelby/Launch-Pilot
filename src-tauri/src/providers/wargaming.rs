@@ -156,4 +156,8 @@ impl LauncherProvider for WargamingProvider {
         }
         Err("Wargaming Game Center executable not found".to_string())
     }
+
+    fn process_names(&self) -> &'static [&'static str] {
+        &["wgc.exe"]
+    }
 }

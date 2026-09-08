@@ -43,6 +43,14 @@ pub trait LauncherProvider: Send + Sync {
     /// Best-effort update trigger. Empty game_id targets the launcher itself
     /// rather than a specific game, for launchers without per-game deep links.
     fn trigger_update(&self, game_id: &str) -> Result<(), String>;
+    /// Process image name(s) (as Windows Task Manager/tasklist would show
+    /// them) that mean this launcher's client is currently running. Used
+    /// only for a live running/not-running indicator, never for detection —
+    /// a launcher can be installed but not running. Empty by default for
+    /// providers where no exe name has been verified.
+    fn process_names(&self) -> &'static [&'static str] {
+        &[]
+    }
 }
 
 pub fn all_providers() -> Vec<Box<dyn LauncherProvider>> {

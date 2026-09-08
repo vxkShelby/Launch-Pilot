@@ -151,6 +151,12 @@ impl LauncherProvider for BattleNetProvider {
         Ok(games)
     }
 
+    // Verified live: the Capabilities registry key's own ApplicationIcon
+    // value on this machine points at "...\Battle.net\Battle.net.exe".
+    fn process_names(&self) -> &'static [&'static str] {
+        &["Battle.net.exe"]
+    }
+
     fn trigger_update(&self, _game_id: &str) -> Result<(), String> {
         open::that("battlenet://").map_err(|e| e.to_string())
     }
