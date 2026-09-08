@@ -1,6 +1,10 @@
+pub mod battlenet;
+pub mod ea;
 pub mod epic;
 pub mod gog;
+pub mod riot;
 pub mod steam;
+pub mod ubisoft;
 
 use serde::Serialize;
 
@@ -25,13 +29,12 @@ pub struct Game {
 
 pub trait LauncherProvider: Send + Sync {
     fn id(&self) -> &'static str;
-    #[allow(dead_code)] // wired into the dashboard in Phase 4
     fn display_name(&self) -> &'static str;
     /// Whether this launcher is installed on the machine.
     fn detect(&self) -> bool;
     fn list_games(&self) -> Result<Vec<Game>, String>;
-    /// Best-effort update trigger. Returns Err if no automated path exists
-    /// for this launcher — callers should fall back to a deep link.
+    /// Best-effort update trigger. Empty game_id targets the launcher itself
+    /// rather than a specific game, for launchers without per-game deep links.
     fn trigger_update(&self, game_id: &str) -> Result<(), String>;
 }
 
@@ -40,5 +43,9 @@ pub fn all_providers() -> Vec<Box<dyn LauncherProvider>> {
         Box::new(steam::SteamProvider),
         Box::new(epic::EpicProvider),
         Box::new(gog::GogProvider),
+        Box::new(ea::EaProvider),
+        Box::new(ubisoft::UbisoftProvider),
+        Box::new(battlenet::BattleNetProvider),
+        Box::new(riot::RiotProvider),
     ]
 }

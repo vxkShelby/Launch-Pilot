@@ -124,3 +124,18 @@ h1 {
   background: #1e2230;
   color: #7a8296;
 }
+
+.connected-only {
+  margin-top: 1rem;
+}
+
+.connected-row {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.4rem 0;
+}
+
+.connected-row span {
+  flex: 1;
+}

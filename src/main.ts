@@ -24,7 +24,16 @@ const LAUNCHER_LABEL: Record<string, string> = {
   steam: "Steam",
   epic: "Epic Games",
   gog: "GOG Galaxy",
+  ea: "EA app",
+  ubisoft: "Ubisoft Connect",
+  battlenet: "Battle.net",
+  riot: "Riot Client",
 };
+
+interface LauncherInfo {
+  id: string;
+  name: string;
+}
 
 function formatSize(bytes: number | null): string {
   if (bytes == null) return "—";
@@ -122,6 +131,39 @@ async function loadGames() {
     launcherGames.sort((a, b) => a.name.localeCompare(b.name));
     listEl.appendChild(buildLauncherSection(launcher, launcherGames));
   }
+
+  await loadConnectedOnly(listEl);
+}
+
+async function loadConnectedOnly(listEl: HTMLElement) {
+  let launchers: LauncherInfo[];
+  try {
+    launchers = await invoke<LauncherInfo[]>("list_launchers_without_games");
+  } catch {
+    return;
+  }
+  if (launchers.length === 0) return;
+
+  const section = document.createElement("div");
+  section.className = "connected-only";
+  const heading = document.createElement("p");
+  heading.className = "muted";
+  heading.textContent = "Connected (no game list available):";
+  section.appendChild(heading);
+
+  launchers.forEach((launcher) => {
+    const row = document.createElement("div");
+    row.className = "connected-row";
+    const name = document.createElement("span");
+    name.textContent = LAUNCHER_LABEL[launcher.id] ?? launcher.name;
+    const btn = document.createElement("button");
+    btn.textContent = "Open";
+    btn.onclick = () => invoke("trigger_update", { launcher: launcher.id, gameId: "" });
+    row.append(name, btn);
+    section.appendChild(row);
+  });
+
+  listEl.appendChild(section);
 }
 
 async function checkForUpdates() {

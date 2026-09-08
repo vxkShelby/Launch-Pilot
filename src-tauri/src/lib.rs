@@ -10,6 +10,7 @@ pub fn run() {
         .plugin(tauri_plugin_process::init())
         .invoke_handler(tauri::generate_handler![
             commands::list_games,
+            commands::list_launchers_without_games,
             commands::trigger_update
         ])
         .run(tauri::generate_context!())
