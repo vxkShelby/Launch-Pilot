@@ -1,0 +1,28 @@
+:root {
+  font-family: "Segoe UI", Inter, Avenir, Helvetica, Arial, sans-serif;
+  font-size: 15px;
+  line-height: 1.5;
+  color: #d8dce6;
+  background-color: #10131a;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+}
+
+body {
+  margin: 0;
+}
+
+.container {
+  padding: 3rem 2rem;
+}
+
+h1 {
+  margin: 0 0 0.25rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.muted {
+  color: #7a8296;
+}
