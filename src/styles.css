@@ -31,6 +31,60 @@ h1 {
   margin-top: 1.5rem;
 }
 
+.launcher-section {
+  border: 1px solid #1e222e;
+  border-radius: 6px;
+  margin-bottom: 0.75rem;
+}
+
+.launcher-section > summary {
+  padding: 0.6rem 0.9rem;
+  cursor: pointer;
+  font-weight: 600;
+  list-style: none;
+}
+
+.launcher-section > summary::-webkit-details-marker {
+  display: none;
+}
+
+.launcher-section > summary::before {
+  content: "▸ ";
+  color: #7a8296;
+}
+
+.launcher-section[open] > summary::before {
+  content: "▾ ";
+}
+
+.launcher-body {
+  padding: 0 0.9rem 0.6rem;
+}
+
+.rest-section {
+  margin-top: 0.4rem;
+}
+
+.rest-section > summary {
+  cursor: pointer;
+  color: #7a8296;
+  font-size: 0.85rem;
+  padding: 0.3rem 0;
+  list-style: none;
+}
+
+.rest-section > summary::-webkit-details-marker {
+  display: none;
+}
+
+.rest-section > summary::before {
+  content: "▸ ";
+}
+
+.rest-section[open] > summary::before {
+  content: "▾ ";
+}
+
 .game-row {
   display: flex;
   align-items: center;

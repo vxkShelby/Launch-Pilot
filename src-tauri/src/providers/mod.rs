@@ -1,3 +1,5 @@
+pub mod epic;
+pub mod gog;
 pub mod steam;
 
 use serde::Serialize;
@@ -34,5 +36,9 @@ pub trait LauncherProvider: Send + Sync {
 }
 
 pub fn all_providers() -> Vec<Box<dyn LauncherProvider>> {
-    vec![Box::new(steam::SteamProvider)]
+    vec![
+        Box::new(steam::SteamProvider),
+        Box::new(epic::EpicProvider),
+        Box::new(gog::GogProvider),
+    ]
 }
