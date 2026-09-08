@@ -2,7 +2,7 @@ import { check } from "@tauri-apps/plugin-updater";
 import { relaunch } from "@tauri-apps/plugin-process";
 import { invoke } from "@tauri-apps/api/core";
 
-type UpdateStatus = "up_to_date" | "update_available" | "unknown";
+type UpdateStatus = "up_to_date" | "update_available" | "updating" | "unknown";
 
 interface Game {
   launcher: string;
@@ -27,6 +27,7 @@ interface DashboardData {
 const STATUS_LABEL: Record<UpdateStatus, string> = {
   up_to_date: "Up to date",
   update_available: "Update available",
+  updating: "Updating…",
   unknown: "Unknown",
 };
 
@@ -39,6 +40,8 @@ const LAUNCHER_LABEL: Record<string, string> = {
   battlenet: "Battle.net",
   riot: "Riot Client",
   prismlauncher: "PrismLauncher",
+  wargaming: "Wargaming Game Center",
+  ageofthering: "Age of the Ring",
 };
 
 const REFRESH_INTERVAL_KEY = "lp.refreshIntervalMinutes";
@@ -72,7 +75,7 @@ function buildGameRow(game: Game): HTMLElement {
 
   row.append(status, name, size);
 
-  if (game.status === "update_available") {
+  if (game.status === "update_available" || game.status === "updating") {
     const btn = document.createElement("button");
     btn.textContent = "Update";
     btn.onclick = () => invoke("trigger_update", { launcher: game.launcher, gameId: game.id });
@@ -83,8 +86,8 @@ function buildGameRow(game: Game): HTMLElement {
 }
 
 function buildLauncherSection(launcher: string, games: Game[]): HTMLElement {
-  const needsUpdate = games.filter((g) => g.status === "update_available");
-  const rest = games.filter((g) => g.status !== "update_available");
+  const needsUpdate = games.filter((g) => g.status === "update_available" || g.status === "updating");
+  const rest = games.filter((g) => g.status !== "update_available" && g.status !== "updating");
 
   const section = document.createElement("details");
   section.className = "launcher-section";

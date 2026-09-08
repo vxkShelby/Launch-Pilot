@@ -1,3 +1,4 @@
+pub mod ageofthering;
 pub mod battlenet;
 pub mod ea;
 pub mod epic;
@@ -6,6 +7,7 @@ pub mod prismlauncher;
 pub mod riot;
 pub mod steam;
 pub mod ubisoft;
+pub mod wargaming;
 
 use serde::Serialize;
 
@@ -14,6 +16,10 @@ use serde::Serialize;
 pub enum UpdateStatus {
     UpToDate,
     UpdateAvailable,
+    /// A download/install is actively in progress right now (observed via
+    /// the launcher's own live log/state, not inferred) — distinct from
+    /// UpdateAvailable, which means "pending, not yet started."
+    Updating,
     Unknown,
 }
 
@@ -49,5 +55,7 @@ pub fn all_providers() -> Vec<Box<dyn LauncherProvider>> {
         Box::new(battlenet::BattleNetProvider),
         Box::new(riot::RiotProvider),
         Box::new(prismlauncher::PrismLauncherProvider),
+        Box::new(wargaming::WargamingProvider),
+        Box::new(ageofthering::AgeOfTheRingProvider),
     ]
 }

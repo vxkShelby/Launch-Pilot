@@ -15,9 +15,23 @@
 // live: it lists Battlefield 6, The Sims 4, and the EA app launcher itself
 // (excluded by name), each with a real DisplayVersion.
 //
-// Update status: DisplayVersion is the *installed* version, not something
-// we can compare against a "latest available" — there's no local field for
-// that anywhere in either scheme. Honest Unknown, same as Epic.
+// Live update-in-progress detection: verified against a real, currently
+// running Battlefield 6 update on this machine. EA Desktop stages package
+// updates under %ProgramData%\EA Desktop\InstallData\<Game>\<component>\ —
+// files at rest are .eacrc/.eacd/.eaa/.eajrn; a *.tmp file only appears in
+// one of those component subfolders while a download/apply is active
+// (confirmed: it was present mid-update, its containing folder pattern is
+// `dlc-Origin.SFT.*` or `base-Origin.SFT.*`). The <Game> folder name is the
+// DisplayName with trademark/registered symbols stripped — also verified
+// live ("Battlefield 6" folder vs. "Battlefield™ 6" registry DisplayName).
+// This ties the signal to a specific game via its own install folder,
+// unlike EA's log file (EADesktop.log's installedStatus=[Active] lines are
+// keyed by EA's internal baseSlug/softwareId, which has no verified mapping
+// back to a DisplayName) — so the .tmp check is the one used here.
+//
+// Update status otherwise: DisplayVersion is the *installed* version, not
+// something we can compare against a "latest available" — there's no local
+// field for that. Honest Unknown when nothing is actively updating.
 use super::{Game, LauncherProvider, UpdateStatus};
 use winreg::enums::HKEY_LOCAL_MACHINE;
 use winreg::RegKey;
@@ -28,6 +42,34 @@ const UNINSTALL_KEYS: [&str; 2] = [
 ];
 
 pub struct EaProvider;
+
+impl EaProvider {
+    fn is_updating(display_name: &str) -> bool {
+        let Ok(program_data) = std::env::var("ProgramData") else {
+            return false;
+        };
+        let folder_name: String = display_name.chars().filter(|c| *c != '\u{2122}' && *c != '\u{00AE}').collect();
+        let install_data = std::path::PathBuf::from(program_data)
+            .join("EA Desktop\\InstallData")
+            .join(folder_name.trim());
+
+        let Ok(components) = std::fs::read_dir(&install_data) else {
+            return false;
+        };
+        for component in components.flatten() {
+            let Ok(files) = std::fs::read_dir(component.path()) else {
+                continue;
+            };
+            if files
+                .flatten()
+                .any(|f| f.path().extension().and_then(|e| e.to_str()) == Some("tmp"))
+            {
+                return true;
+            }
+        }
+        false
+    }
+}
 
 impl LauncherProvider for EaProvider {
     fn id(&self) -> &'static str {
@@ -66,13 +108,18 @@ impl LauncherProvider for EaProvider {
                     continue;
                 }
                 let version: Option<String> = entry.get_value("DisplayVersion").ok();
+                let status = if Self::is_updating(&name) {
+                    UpdateStatus::Updating
+                } else {
+                    UpdateStatus::Unknown
+                };
 
                 games.push(Game {
                     launcher: "ea",
                     id: subkey_name.trim_matches(|c| c == '{' || c == '}').to_string(),
                     name,
                     installed_build: version,
-                    status: UpdateStatus::Unknown,
+                    status,
                     size_bytes: None,
                     last_updated: None,
                 });

@@ -208,6 +208,11 @@ button:disabled {
   color: #ffb454;
 }
 
+.status-updating {
+  background: #1c2f45;
+  color: #7bb8ff;
+}
+
 .status-unknown {
   background: #1e2230;
   color: #7a8296;

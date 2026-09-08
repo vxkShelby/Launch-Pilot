@@ -6,7 +6,7 @@
 
 **One dashboard for every game launcher on your PC.**
 
-See what needs updating across Steam, Epic, GOG, EA, Ubisoft Connect, Battle.net, Riot, and PrismLauncher — and trigger updates without opening eight different apps.
+See what needs updating across Steam, Epic, GOG, EA, Ubisoft Connect, Battle.net, Riot, PrismLauncher, Wargaming Game Center, and Age of the Ring — and trigger updates without opening ten different apps.
 
 [![release](https://img.shields.io/github/v/release/vxkShelby/Launch-Pilot?label=release)](https://github.com/vxkShelby/Launch-Pilot/releases/latest)
 [![release workflow](https://github.com/vxkShelby/Launch-Pilot/actions/workflows/release.yml/badge.svg)](https://github.com/vxkShelby/Launch-Pilot/actions/workflows/release.yml)
@@ -32,10 +32,12 @@ whether an update is pending, LaunchPilot says **Unknown** instead of guessing.
 | **Epic Games** | ✅ | ✅ | — *(no local field exists)* | `com.epicgames.launcher://apps/<id>` |
 | **GOG Galaxy** | ✅ | ✅ | — *(no local field exists)* | `goggalaxy://openGameView/<id>` |
 | **Riot Client** | ✅ | ✅ (light) | — *(no local field exists)* | launches `RiotClientServices.exe` |
-| **EA app** | ✅ | ✅ (registry) | — *(no local field exists)* | `origin2://` (opens client) |
+| **EA app** | ✅ | ✅ (registry) | ✅ live "Updating" (`.tmp` staging files) | `origin2://` (opens client) |
 | **PrismLauncher** | ✅ | ✅ | — *(pinned versions, no update concept)* | launches `prismlauncher.exe` |
-| **Ubisoft Connect** | ✅ | — *(format not verified)* | — | `uplay://` (opens client) |
-| **Battle.net** | ✅ | — *(format not verified)* | — | `battlenet://` (opens client) |
+| **Ubisoft Connect** | ✅ | ✅ (registry) | — *(no local field exists)* | `uplay://` (opens client) |
+| **Battle.net** | ✅ | ✅ (registry, known-product table) | ✅ live "Updating" (log-based) | `battlenet://` (opens client) |
+| **Wargaming Game Center** | ✅ | ✅ (`preferences.xml`) | ✅ (`game_info.xml` installed vs. available) | scans for `wgc.exe` (heuristic) |
+| **Age of the Ring** | ⚠️ heuristic (drive scan, no installer footprint) | ✅ (mod + 2 base games) | — *(no local field exists)* | launches `AotR_Launcher.exe` |
 
 Steam is the reference implementation — full local visibility into what's installed, what build it's
 on, and whether Valve has a newer one queued. The others get exactly as much automation as their
