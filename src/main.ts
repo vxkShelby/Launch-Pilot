@@ -19,6 +19,11 @@ interface LauncherInfo {
   name: string;
 }
 
+interface DashboardData {
+  games: Game[];
+  connected_only: LauncherInfo[];
+}
+
 const STATUS_LABEL: Record<UpdateStatus, string> = {
   up_to_date: "Up to date",
   update_available: "Update available",
@@ -133,12 +138,14 @@ async function loadGames() {
   const listEl = document.querySelector<HTMLElement>("#game-list");
   if (!listEl) return;
 
+  let data: DashboardData;
   try {
-    allGames = await invoke<Game[]>("list_games");
+    data = await invoke<DashboardData>("dashboard_data");
   } catch (err) {
     listEl.textContent = `Failed to list games: ${err}`;
     return;
   }
+  allGames = data.games;
 
   updateStats();
   setLastChecked();
@@ -160,17 +167,11 @@ async function loadGames() {
     }
   }
 
-  await loadConnectedOnly(listEl);
+  renderConnectedOnly(listEl, data.connected_only);
   applySearchFilter();
 }
 
-async function loadConnectedOnly(listEl: HTMLElement) {
-  let launchers: LauncherInfo[];
-  try {
-    launchers = await invoke<LauncherInfo[]>("list_launchers_without_games");
-  } catch {
-    return;
-  }
+function renderConnectedOnly(listEl: HTMLElement, launchers: LauncherInfo[]) {
   if (launchers.length === 0) return;
 
   const section = document.createElement("div");
