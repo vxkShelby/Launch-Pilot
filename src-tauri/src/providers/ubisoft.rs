@@ -20,11 +20,121 @@
 //
 // Update status: no local field indicates a pending/active update for a
 // specific game — honest Unknown, same as Epic/GOG.
+//
+// Steam-installed Ubisoft games: REAL, verified live on this machine.
+// Several Ubisoft-published games bought on Steam (Far Cry 3, Rainbow Six
+// Siege, Riders Republic, The Settlers: New Allies, Avatar: Frontiers of
+// Pandora) never populate this file's own HKLM\...\Installs\<id>\InstallDir
+// key — Steam runs Ubisoft's installer silently via its own InstallScript
+// mechanism, which instead writes to HKCU\SOFTWARE\Ubisoft\Launcher\Installs
+// (verified populated on this machine, 8 entries, InstallState=1 each) with
+// no InstallDir or name field at all — so that HKCU key alone can't name a
+// game either. What every one of those five real installs DOES ship, inside
+// its own Steam install folder, is a real `UbisoftConnectInstaller.exe` (and
+// often a matching `.vdf` install-script) — confirmed present on this
+// machine in each of the five folders. So instead of the unusable HKCU id,
+// this scans Steam's own library folders (same libraryfolders.vdf +
+// appmanifest_*.acf format steam.rs already parses) for that installer
+// file's presence, and reports the game using Steam's own verified name.
 use super::{Game, LauncherProvider, UpdateStatus};
+use crate::vdf;
+use std::path::{Path, PathBuf};
 use winreg::enums::HKEY_LOCAL_MACHINE;
 use winreg::RegKey;
 
 pub struct UbisoftProvider;
+
+impl UbisoftProvider {
+    fn steam_path() -> Option<PathBuf> {
+        let hkcu = winreg::RegKey::predef(winreg::enums::HKEY_CURRENT_USER);
+        let key = hkcu.open_subkey("Software\\Valve\\Steam").ok()?;
+        let path: String = key.get_value("SteamPath").ok()?;
+        Some(PathBuf::from(path.replace('/', "\\")))
+    }
+
+    fn library_paths(steam_path: &Path) -> Vec<PathBuf> {
+        let vdf_path = steam_path.join("steamapps").join("libraryfolders.vdf");
+        let Ok(content) = std::fs::read_to_string(&vdf_path) else {
+            return vec![steam_path.to_path_buf()];
+        };
+        let Some(root) = vdf::parse(&content) else {
+            return vec![steam_path.to_path_buf()];
+        };
+        let Some(folders) = root.get("libraryfolders").and_then(|v| v.as_block()) else {
+            return vec![steam_path.to_path_buf()];
+        };
+        let mut paths = Vec::new();
+        for entry in folders.values() {
+            if let Some(block) = entry.as_block() {
+                if let Some(path) = block.get("path").and_then(|v| v.as_str()) {
+                    paths.push(PathBuf::from(path.replace('\\', "/")));
+                }
+            }
+        }
+        if paths.is_empty() {
+            paths.push(steam_path.to_path_buf());
+        }
+        paths
+    }
+
+    /// Steam-installed games that ship Ubisoft's own installer in their
+    /// install folder — the real signal a Steam copy also needs Ubisoft
+    /// Connect, since Ubisoft's own registry doesn't name these installs.
+    fn steam_ubisoft_games() -> Vec<Game> {
+        let Some(steam_path) = Self::steam_path() else {
+            return Vec::new();
+        };
+        let mut games = Vec::new();
+        for library in Self::library_paths(&steam_path) {
+            let steamapps = library.join("steamapps");
+            let Ok(entries) = std::fs::read_dir(&steamapps) else {
+                continue;
+            };
+            for entry in entries.flatten() {
+                let path = entry.path();
+                let is_manifest = path
+                    .file_name()
+                    .and_then(|f| f.to_str())
+                    .is_some_and(|f| f.starts_with("appmanifest_") && f.ends_with(".acf"));
+                if !is_manifest {
+                    continue;
+                }
+                let Ok(content) = std::fs::read_to_string(&path) else {
+                    continue;
+                };
+                let Some(root) = vdf::parse(&content) else {
+                    continue;
+                };
+                let Some(state) = root.get("AppState").and_then(|v| v.as_block()) else {
+                    continue;
+                };
+                let (Some(appid), Some(name), Some(installdir)) = (
+                    state.get("appid").and_then(|v| v.as_str()),
+                    state.get("name").and_then(|v| v.as_str()),
+                    state.get("installdir").and_then(|v| v.as_str()),
+                ) else {
+                    continue;
+                };
+                let game_dir = steamapps.join("common").join(installdir);
+                let has_ubisoft_installer = game_dir.join("UbisoftConnectInstaller.exe").exists()
+                    || game_dir.join("UbisoftConnectInstaller.vdf").exists();
+                if !has_ubisoft_installer {
+                    continue;
+                }
+                games.push(Game {
+                    launcher: "ubisoft",
+                    id: format!("steam-{appid}"),
+                    name: name.to_string(),
+                    installed_build: None,
+                    status: UpdateStatus::Unknown,
+                    size_bytes: None,
+                    last_updated: None,
+                });
+            }
+        }
+        games
+    }
+}
 
 impl LauncherProvider for UbisoftProvider {
     fn id(&self) -> &'static str {
@@ -70,6 +180,14 @@ impl LauncherProvider for UbisoftProvider {
                 size_bytes: None,
                 last_updated: None,
             });
+        }
+
+        let mut seen_names: std::collections::HashSet<String> =
+            games.iter().map(|g| g.name.clone()).collect();
+        for game in Self::steam_ubisoft_games() {
+            if seen_names.insert(game.name.clone()) {
+                games.push(game);
+            }
         }
         Ok(games)
     }

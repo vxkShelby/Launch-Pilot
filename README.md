@@ -34,7 +34,7 @@ whether an update is pending, LaunchPilot says **Unknown** instead of guessing.
 | **Riot Client** | ✅ | ✅ (light) | — *(no local field exists)* | launches `RiotClientServices.exe` |
 | **EA app** | ✅ | ✅ (registry) | ✅ live "Updating" (`.tmp` staging files) | `origin2://` (opens client) |
 | **PrismLauncher** | ✅ | ✅ | — *(pinned versions, no update concept)* | launches `prismlauncher.exe` |
-| **Ubisoft Connect** | ✅ | ✅ (registry) | — *(no local field exists)* | `uplay://` (opens client) |
+| **Ubisoft Connect** | ✅ | ✅ (registry + Steam cross-detect) | — *(no local field exists)* | `uplay://` (opens client) |
 | **Battle.net** | ✅ | ✅ (registry, known-product table) | ✅ live "Updating" (log-based) | `battlenet://` (opens client) |
 | **Wargaming Game Center** | ✅ | ✅ (`preferences.xml`) | ✅ (`game_info.xml` installed vs. available) | scans for `wgc.exe` (heuristic) |
 | **Age of the Ring** | ⚠️ heuristic (drive scan, no installer footprint) | ✅ (mod + 2 base games) | — *(no local field exists)* | launches `AotR_Launcher.exe` |

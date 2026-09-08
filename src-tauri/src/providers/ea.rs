@@ -29,6 +29,15 @@
 // keyed by EA's internal baseSlug/softwareId, which has no verified mapping
 // back to a DisplayName) — so the .tmp check is the one used here.
 //
+// Bug fix, verified live: the .tmp file's mere *presence* is not "active
+// right now" — pausing a download in EA Desktop leaves the same partial
+// .tmp file sitting on disk untouched, so the old presence-only check kept
+// reporting "Updating" for a paused download indefinitely. Confirmed on
+// this machine: pausing Battlefield 6's update left deps.tmp in place with
+// its LastWriteTime frozen at the pause moment. Fixed by requiring the file
+// to have been written within the last 10 seconds — a download actively
+// streaming bytes touches its .tmp file continuously, a paused one doesn't.
+//
 // Update status otherwise: DisplayVersion is the *installed* version, not
 // something we can compare against a "latest available" — there's no local
 // field for that. Honest Unknown when nothing is actively updating.
@@ -56,14 +65,22 @@ impl EaProvider {
         let Ok(components) = std::fs::read_dir(&install_data) else {
             return false;
         };
+        const ACTIVE_WINDOW: std::time::Duration = std::time::Duration::from_secs(10);
+        let now = std::time::SystemTime::now();
+
         for component in components.flatten() {
             let Ok(files) = std::fs::read_dir(component.path()) else {
                 continue;
             };
-            if files
+            let is_actively_written = files
                 .flatten()
-                .any(|f| f.path().extension().and_then(|e| e.to_str()) == Some("tmp"))
-            {
+                .filter(|f| f.path().extension().and_then(|e| e.to_str()) == Some("tmp"))
+                .any(|f| {
+                    f.metadata()
+                        .and_then(|m| m.modified())
+                        .is_ok_and(|modified| now.duration_since(modified).is_ok_and(|age| age < ACTIVE_WINDOW))
+                });
+            if is_actively_written {
                 return true;
             }
         }
