@@ -228,11 +228,12 @@ pub fn provider_data(launcher: String) -> Option<ProviderResult> {
     if !provider.detect() {
         return None;
     }
-    let running = running_process_names();
-    let is_running = provider
-        .process_names()
-        .iter()
-        .any(|name| running.contains(&name.to_ascii_lowercase()));
+    let is_running = if let Some(special) = provider.is_running() {
+        special
+    } else {
+        let running = running_process_names();
+        provider.process_names().iter().any(|name| running.contains(&name.to_ascii_lowercase()))
+    };
     let games = provider.list_games().unwrap_or_default();
 
     Some(ProviderResult {

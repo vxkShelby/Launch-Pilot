@@ -213,22 +213,38 @@ impl LauncherProvider for UbisoftProvider {
         Ok(games)
     }
 
-    // Deliberately NOT reporting a running/not-running signal for Ubisoft
-    // Connect, even though its exe name is known (UbisoftConnect.exe /
-    // upc.exe, the older legacy name for the same client). Verified live,
-    // twice: its process stays resident in the background as a tray-icon
-    // helper after the user closes the actual UI window — confirmed via a
-    // raw Win32 EnumWindows dump that this produces the exact same "hidden
-    // window with a real title" shape as Steam genuinely running but
-    // minimized to tray, so process-presence alone would report "running"
-    // when the user never opened it (the bug this comment replaces a fix
-    // attempt for). No reliable local signal to tell the two apart was
-    // found. Reporting a running dot from a proven-unreliable signal would
-    // be worse than reporting none — falls back to the trait's default (no
-    // process check), same honest treatment as launchers with no exe path
-    // known at all.
+    // process_names() alone can't tell "genuinely open" from "backgrounded
+    // tray helper" for upc.exe (verified live via a raw Win32 EnumWindows
+    // dump — both cases produce the same hidden-window-with-a-title shape).
+    // is_running() below replaces that generic check with a real signal
+    // found by inspecting Task Manager's own "Command line" column: a
+    // background-only upc.exe process is launched with a `-upc_desktop_mode`
+    // flag (verified live: `"X:\Ubisoft Game Launcher\upc.exe"
+    // -upc_desktop_mode` shown for the resident tray helper). A genuinely
+    // user-opened client doesn't carry that flag.
     fn process_names(&self) -> &'static [&'static str] {
         &[]
+    }
+
+    fn is_running(&self) -> Option<bool> {
+        let mut command = std::process::Command::new("powershell");
+        command
+            .arg("-NoProfile")
+            .arg("-Command")
+            .arg("Get-CimInstance Win32_Process -Filter \"Name='upc.exe' OR Name='UbisoftConnect.exe'\" | Select-Object -ExpandProperty CommandLine");
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            const CREATE_NO_WINDOW: u32 = 0x08000000;
+            command.creation_flags(CREATE_NO_WINDOW);
+        }
+        let output = command.output().ok()?;
+        let text = String::from_utf8_lossy(&output.stdout);
+        let command_lines: Vec<&str> = text.lines().filter(|l| !l.trim().is_empty()).collect();
+        if command_lines.is_empty() {
+            return Some(false);
+        }
+        Some(command_lines.iter().any(|line| !line.contains("-upc_desktop_mode")))
     }
 
     fn icon_source(&self) -> Option<PathBuf> {

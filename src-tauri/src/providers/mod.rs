@@ -51,6 +51,15 @@ pub trait LauncherProvider: Send + Sync {
     fn process_names(&self) -> &'static [&'static str] {
         &[]
     }
+    /// Overrides the generic process_names-based running check when a
+    /// launcher needs more than "is the process alive" to answer honestly
+    /// (e.g. Ubisoft Connect's upc.exe stays resident as a tray-only helper
+    /// after the UI closes — its own command line real-signals this via a
+    /// `-upc_desktop_mode` flag, verified live from this machine's own Task
+    /// Manager). None means "no special-case check, use process_names."
+    fn is_running(&self) -> Option<bool> {
+        None
+    }
     /// Real local path to this launcher's own client exe (or a registry
     /// DisplayIcon-style file), used only to pull its actual icon for
     /// display — never guessed/hardcoded to a value not backed by a
