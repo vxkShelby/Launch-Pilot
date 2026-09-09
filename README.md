@@ -33,7 +33,7 @@ whether an update is pending, LaunchPilot says **Unknown** instead of guessing.
 | **GOG Galaxy** | ✅ | ✅ | ✅ live (`content-system.gog.com`, no login) | `goggalaxy://openGameView/<id>` |
 | **Riot Client** | ✅ | ✅ (light) | — *(no local field exists)* | launches `RiotClientServices.exe` |
 | **EA app** | ✅ | ✅ (registry) | ✅ live "Updating" (`.tmp` staging files) | `origin2://` (opens client) |
-| **PrismLauncher** | ✅ | ✅ | ✅ live (Mojang's public version manifest, no login) | launches `prismlauncher.exe` |
+| **PrismLauncher** | ✅ | ✅ | ✅ launcher app itself (GitHub releases, no login) + per-mod (Modrinth pack instances only) | launches `prismlauncher.exe` |
 | **Ubisoft Connect** | ✅ | ✅ (registry + Steam cross-detect) | — *(no local field exists)* | `uplay://` (opens client) — running status via `-upc_desktop_mode` command-line check |
 | **Battle.net** | ✅ | ✅ (registry, known-product table) | ✅ live "Updating" (log-based) | `battlenet://` (opens client) |
 | **Wargaming Game Center** | ✅ | ✅ (`preferences.xml`) | ✅ (`game_info.xml` installed vs. available) | scans for `wgc.exe` (heuristic) |
