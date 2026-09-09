@@ -19,15 +19,51 @@ use serde::Serialize;
 /// correct for every launcher tested except Ubisoft Connect's tray-resident
 /// helper, a disclosed known limitation rather than a fragile heuristic
 /// that broke Steam to partially fix Ubisoft.
+///
+/// Bug fix, verified live: `provider_data` is called once per launcher (10
+/// parallel invokes per dashboard load/refresh), and each one used to spawn
+/// its own `tasklist` process — 10 child console processes at once on every
+/// startup. Two real problems from that, both fixed here: (1) `tasklist`
+/// inherits a visible console window unless explicitly told not to (Rust's
+/// std::process::Command doesn't set that by default), so the user saw cmd
+/// windows flash on launch; (2) spawning + waiting on 10 of them at once is
+/// real OS overhead that was visible as LaunchPilot going "Not Responding"
+/// momentarily. Fixed by adding the CREATE_NO_WINDOW flag (suppresses the
+/// console) and caching the one real snapshot for a couple of seconds so
+/// concurrent provider_data calls from the same refresh share it instead of
+/// each spawning their own.
 fn running_process_names() -> std::collections::HashSet<String> {
-    let Ok(output) = std::process::Command::new("tasklist").arg("/FO").arg("CSV").arg("/NH").output() else {
-        return std::collections::HashSet::new();
+    use std::sync::{Mutex, OnceLock};
+    use std::time::{Duration, Instant};
+
+    static CACHE: OnceLock<Mutex<Option<(Instant, std::collections::HashSet<String>)>>> = OnceLock::new();
+    let cache = CACHE.get_or_init(|| Mutex::new(None));
+    let mut guard = cache.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some((fetched_at, names)) = guard.as_ref() {
+        if fetched_at.elapsed() < Duration::from_secs(2) {
+            return names.clone();
+        }
+    }
+
+    let mut command = std::process::Command::new("tasklist");
+    command.arg("/FO").arg("CSV").arg("/NH");
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
+
+    let names: std::collections::HashSet<String> = match command.output() {
+        Ok(output) => String::from_utf8_lossy(&output.stdout)
+            .lines()
+            .filter_map(|line| line.split(',').next())
+            .map(|name| name.trim_matches('"').to_ascii_lowercase())
+            .collect(),
+        Err(_) => std::collections::HashSet::new(),
     };
-    let text = String::from_utf8_lossy(&output.stdout);
-    text.lines()
-        .filter_map(|line| line.split(',').next())
-        .map(|name| name.trim_matches('"').to_ascii_lowercase())
-        .collect()
+    *guard = Some((Instant::now(), names.clone()));
+    names
 }
 
 /// Static id list — fast, no registry/network/process work — so the

@@ -213,11 +213,22 @@ impl LauncherProvider for UbisoftProvider {
         Ok(games)
     }
 
-    // Verified live: this machine's install folder (from the registry's own
-    // InstallDir) has UbisoftConnect.exe as the current main executable
-    // (upc.exe also present, the older/legacy name for the same client).
+    // Deliberately NOT reporting a running/not-running signal for Ubisoft
+    // Connect, even though its exe name is known (UbisoftConnect.exe /
+    // upc.exe, the older legacy name for the same client). Verified live,
+    // twice: its process stays resident in the background as a tray-icon
+    // helper after the user closes the actual UI window — confirmed via a
+    // raw Win32 EnumWindows dump that this produces the exact same "hidden
+    // window with a real title" shape as Steam genuinely running but
+    // minimized to tray, so process-presence alone would report "running"
+    // when the user never opened it (the bug this comment replaces a fix
+    // attempt for). No reliable local signal to tell the two apart was
+    // found. Reporting a running dot from a proven-unreliable signal would
+    // be worse than reporting none — falls back to the trait's default (no
+    // process check), same honest treatment as launchers with no exe path
+    // known at all.
     fn process_names(&self) -> &'static [&'static str] {
-        &["UbisoftConnect.exe", "upc.exe"]
+        &[]
     }
 
     fn icon_source(&self) -> Option<PathBuf> {
