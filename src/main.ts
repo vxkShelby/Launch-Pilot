@@ -130,6 +130,7 @@ function buildGameRow(game: Game): HTMLElement {
     updateSize.className = "update-size";
     updateSize.textContent = formatSize(null);
     const btn = document.createElement("button");
+    btn.className = "btn-update";
     btn.textContent = "Update";
     btn.onclick = () => invoke("trigger_update", { launcher: game.launcher, gameId: game.id });
     row.append(updateSize, btn);
@@ -147,12 +148,27 @@ function buildLauncherSection(launcher: string, games: Game[]): HTMLElement {
   section.dataset.launcher = launcher;
 
   const summary = document.createElement("summary");
-  const badge = needsUpdate.length > 0 ? ` (${needsUpdate.length} update${needsUpdate.length === 1 ? "" : "s"})` : "";
-  const totalBytes = games.reduce<number | null>((sum, g) => (g.size_bytes == null ? sum : (sum ?? 0) + g.size_bytes), null);
-  const totalLabel = totalBytes == null ? "" : ` · ${formatSize(totalBytes)}`;
   summary.appendChild(buildLauncherIcon(launcher));
   summary.appendChild(buildRunningDot(launcher));
-  summary.append(`${LAUNCHER_LABEL[launcher] ?? launcher} — ${games.length} game${games.length === 1 ? "" : "s"}${badge}${totalLabel}`);
+
+  const title = document.createElement("span");
+  title.className = "lane-title";
+  title.textContent = LAUNCHER_LABEL[launcher] ?? launcher;
+  summary.appendChild(title);
+
+  if (needsUpdate.length > 0) {
+    const badge = document.createElement("span");
+    badge.className = "lane-badge";
+    badge.textContent = `${needsUpdate.length} update${needsUpdate.length === 1 ? "" : "s"}`;
+    summary.appendChild(badge);
+  }
+
+  const totalBytes = games.reduce<number | null>((sum, g) => (g.size_bytes == null ? sum : (sum ?? 0) + g.size_bytes), null);
+  const meta = document.createElement("span");
+  meta.className = "lane-meta";
+  meta.textContent = `${games.length} game${games.length === 1 ? "" : "s"}${totalBytes == null ? "" : ` · ${formatSize(totalBytes)}`}`;
+  summary.appendChild(meta);
+
   section.appendChild(summary);
 
   const body = document.createElement("div");
@@ -183,6 +199,7 @@ function updateStats() {
 
   const pending = allGames.filter((g) => g.status === "update_available").length;
   statsEl.textContent = `${allGames.length} games · ${pending} update${pending === 1 ? "" : "s"} pending`;
+  statsEl.classList.toggle("stats-pending", pending > 0);
 
   if (updateAllBtn) {
     updateAllBtn.hidden = pending === 0;
