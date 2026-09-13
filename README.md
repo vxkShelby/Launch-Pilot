@@ -10,6 +10,7 @@ See what needs updating across Steam, Epic, GOG, EA, Ubisoft Connect, Battle.net
 
 [![release](https://img.shields.io/github/v/release/vxkShelby/Launch-Pilot?label=release)](https://github.com/vxkShelby/Launch-Pilot/releases/latest)
 [![release workflow](https://github.com/vxkShelby/Launch-Pilot/actions/workflows/release.yml/badge.svg)](https://github.com/vxkShelby/Launch-Pilot/actions/workflows/release.yml)
+[![downloads](https://img.shields.io/github/downloads/vxkShelby/Launch-Pilot/total)](https://github.com/vxkShelby/Launch-Pilot/releases)
 ![platform](https://img.shields.io/badge/platform-Windows-0078D6)
 ![Tauri](https://img.shields.io/badge/Tauri-v2-24C8DB)
 
@@ -46,6 +47,12 @@ local data honestly supports; the rest is one click into the real launcher.
 Every launcher and game also shows its real local icon (pulled from Windows' own icon cache for
 that launcher's client exe, or that specific game's own exe/registry-declared icon) — never a
 bundled or guessed image.
+
+## Privacy & support
+
+No accounts, no telemetry, no analytics — see [PRIVACY.md](PRIVACY.md) for exactly what LaunchPilot
+does and doesn't send. Bug reports and questions go through
+[SUPPORT.md](SUPPORT.md) (GitHub Issues + Discussions).
 
 ## Dev
 

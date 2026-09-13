@@ -220,6 +220,14 @@ function buildLoadingPlaceholder(launcher: string): HTMLElement {
   return el;
 }
 
+function buildErrorRow(launcher: string): HTMLElement {
+  const el = document.createElement("div");
+  el.className = "launcher-error";
+  el.dataset.launcher = launcher;
+  el.textContent = `${LAUNCHER_LABEL[launcher] ?? launcher} — check failed, will retry on next refresh`;
+  return el;
+}
+
 function buildConnectedRow(result: ProviderResult): HTMLElement {
   const row = document.createElement("div");
   row.className = "connected-row";
@@ -281,15 +289,20 @@ async function loadGames() {
   let settled = 0;
   ids.forEach((id) => {
     invoke<ProviderResult | null>("provider_data", { launcher: id })
-      .catch(() => null)
-      .then((result) => {
+      .then((result): [ProviderResult | null, boolean] => [result, false])
+      .catch((): [ProviderResult | null, boolean] => [null, true])
+      .then(([result, failed]) => {
         if (requestId !== loadRequestId) return;
         settled += 1;
 
         const placeholder = placeholders.get(id);
         if (result && result.running) runningLaunchers.add(id);
 
-        if (!result) {
+        if (failed) {
+          // Real check errored (not just "launcher absent") — say so instead
+          // of silently treating it the same as not-installed.
+          placeholder?.replaceWith(buildErrorRow(id));
+        } else if (!result) {
           placeholder?.remove();
         } else if (result.games.length === 0) {
           placeholder?.remove();
@@ -314,6 +327,7 @@ async function loadGames() {
 function applySearchFilter() {
   const search = document.querySelector<HTMLInputElement>("#search");
   const query = search?.value.trim().toLowerCase() ?? "";
+  let anyMatch = false;
 
   document.querySelectorAll<HTMLDetailsElement>(".launcher-section").forEach((section) => {
     let sectionHasMatch = false;
@@ -323,11 +337,25 @@ function applySearchFilter() {
       if (matches) sectionHasMatch = true;
     });
     section.hidden = query !== "" && !sectionHasMatch;
+    if (sectionHasMatch) anyMatch = true;
     if (query !== "" && sectionHasMatch) {
       section.open = true;
       section.querySelectorAll<HTMLDetailsElement>(".rest-section").forEach((r) => (r.open = true));
     }
   });
+
+  const listEl = document.querySelector<HTMLElement>("#game-list");
+  let noResults = listEl?.querySelector<HTMLElement>(".no-results") ?? null;
+  if (query !== "" && !anyMatch && document.querySelector(".launcher-section")) {
+    if (!noResults && listEl) {
+      noResults = document.createElement("p");
+      noResults.className = "no-results muted";
+      listEl.appendChild(noResults);
+    }
+    if (noResults) noResults.textContent = `No games match "${search?.value.trim()}".`;
+  } else {
+    noResults?.remove();
+  }
 }
 
 async function updateAll() {

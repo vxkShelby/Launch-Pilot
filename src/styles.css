@@ -259,6 +259,18 @@ button:disabled {
   font-size: 0.85rem;
 }
 
+.launcher-error {
+  padding: 0.6rem 0.5rem;
+  border-top: 1px solid var(--line);
+  font-size: 0.85rem;
+  color: var(--blue);
+}
+
+.no-results {
+  padding: 0.6rem 0.5rem;
+  font-size: 0.85rem;
+}
+
 .launcher-section {
   border-top: 1px solid var(--line);
   animation: lane-in 0.25s ease both;
