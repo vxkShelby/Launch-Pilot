@@ -552,6 +552,45 @@ button:disabled {
   padding: 0.3rem 0.5rem;
 }
 
+.onboarding-card {
+  max-width: 26rem;
+}
+
+.onboarding-intro {
+  margin: 0 0 1rem;
+  font-size: 0.85rem;
+  color: var(--ink-dim);
+  line-height: 1.5;
+}
+
+.onboarding-legend {
+  list-style: none;
+  margin: 0 0 1.25rem;
+  padding: 0;
+}
+
+.onboarding-legend li {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.55rem 0;
+  border-top: 1px solid var(--line-soft);
+  font-size: 0.85rem;
+  color: var(--ink-dim);
+}
+
+.onboarding-legend li:first-child {
+  border-top: none;
+}
+
+.onboarding-legend .status {
+  flex: 0 0 8rem;
+}
+
+.onboarding-legend .running-dot + .running-dot {
+  margin-left: -0.35rem;
+}
+
 .statusbar {
   padding: 0.5rem 1.25rem;
   border-top: 1px solid var(--line);

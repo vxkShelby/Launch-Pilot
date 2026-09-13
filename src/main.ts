@@ -43,6 +43,7 @@ const LAUNCHER_LABEL: Record<string, string> = {
 
 const REFRESH_INTERVAL_KEY = "lp.refreshIntervalMinutes";
 const DEFAULT_REFRESH_MINUTES = 30;
+const ONBOARDING_SEEN_KEY = "lp.onboardingSeen";
 
 let allGames: Game[] = [];
 let runningLaunchers: Set<string> = new Set();
@@ -438,8 +439,32 @@ function setupControls() {
   }
 }
 
+function setupOnboarding() {
+  const panel = document.querySelector<HTMLElement>("#onboarding-panel");
+  if (!panel) return;
+
+  const dismiss = () => {
+    panel.hidden = true;
+    localStorage.setItem(ONBOARDING_SEEN_KEY, "1");
+  };
+
+  if (!localStorage.getItem(ONBOARDING_SEEN_KEY)) {
+    panel.hidden = false;
+  }
+
+  document.querySelector("#onboarding-close")?.addEventListener("click", dismiss);
+  // Clicking the dimmed backdrop (not the card itself) also dismisses it.
+  panel.addEventListener("click", (e) => {
+    if (e.target === panel) dismiss();
+  });
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && !panel.hidden) dismiss();
+  });
+}
+
 window.addEventListener("DOMContentLoaded", () => {
   setupControls();
+  setupOnboarding();
   checkForUpdates();
   loadGames();
   applyRefreshInterval();

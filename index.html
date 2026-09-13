@@ -29,6 +29,30 @@
       <div id="game-list" class="muted">Loading games&hellip;</div>
     </main>
 
+    <div id="onboarding-panel" class="settings-panel" hidden>
+      <div class="settings-card onboarding-card">
+        <h2>Welcome to LaunchPilot</h2>
+        <p class="onboarding-intro">
+          LaunchPilot reads what your installed launchers already know, locally — no accounts, no
+          telemetry, nothing about your library ever leaves this machine.
+        </p>
+        <ul class="onboarding-legend">
+          <li><span class="status status-up_to_date">Up to date</span> No update pending.</li>
+          <li><span class="status status-update_available">Update available</span> Action needed.</li>
+          <li><span class="status status-updating">Updating…</span> Install is in progress.</li>
+          <li>
+            <span class="status status-unknown">Unknown</span>
+            This launcher doesn't expose real update info, so LaunchPilot won't guess.
+          </li>
+          <li>
+            <span class="running-dot running-dot-on"></span><span class="running-dot running-dot-off"></span>
+            Whether that launcher's process is currently running.
+          </li>
+        </ul>
+        <button id="onboarding-close">Got it</button>
+      </div>
+    </div>
+
     <div id="settings-panel" class="settings-panel" hidden>
       <div class="settings-card">
         <h2>Settings</h2>
