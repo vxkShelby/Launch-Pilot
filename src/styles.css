@@ -106,7 +106,7 @@ body {
   border-radius: 5px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: var(--ink-faint);
+  background: var(--ink-dim);
 }
 
 button:focus-visible,
@@ -187,10 +187,10 @@ select:focus-visible {
 }
 
 #search::placeholder {
-  color: var(--ink-faint);
+  color: var(--ink-dim);
 }
 
-#search:focus {
+#search:focus-visible {
   outline: none;
   border-color: var(--amber);
 }
@@ -209,7 +209,7 @@ button {
 }
 
 button:hover {
-  border-color: var(--ink-faint);
+  border-color: var(--ink-dim);
 }
 
 button:disabled {
@@ -304,7 +304,7 @@ button:disabled {
 
 .launcher-section > summary::before {
   content: "▸";
-  color: var(--ink-faint);
+  color: var(--ink-dim);
   font-size: 0.75rem;
 }
 
@@ -410,7 +410,7 @@ button:disabled {
 
 .update-size {
   font-family: var(--font-mono);
-  color: var(--ink-faint);
+  color: var(--ink-dim);
   font-variant-numeric: tabular-nums;
   font-size: 0.74rem;
 }
@@ -424,6 +424,21 @@ button:disabled {
 
 .btn-update:hover {
   background: var(--amber);
+  color: var(--bg-0);
+}
+
+/* Quiet blue outline, not amber — amber is reserved for "needs attention"
+   (see the palette comment at the top of this file), and launching a game
+   isn't that, so it must not look like the Update button. */
+.btn-launch {
+  background: transparent;
+  border: 1px solid var(--blue);
+  color: var(--blue);
+  font-weight: 600;
+}
+
+.btn-launch:hover {
+  background: var(--blue);
   color: var(--bg-0);
 }
 
@@ -455,7 +470,7 @@ button:disabled {
 
 .status-unknown {
   background: transparent;
-  color: var(--ink-faint);
+  color: var(--ink-dim);
   font-weight: 400;
   padding-left: 0;
 }

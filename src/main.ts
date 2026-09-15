@@ -41,6 +41,14 @@ const LAUNCHER_LABEL: Record<string, string> = {
   ageofthering: "Age of the Ring",
 };
 
+// Launchers whose provider implements a real, verified per-game exe path
+// (LauncherProvider::game_icon_source in Rust) and therefore a real
+// `launch_game` — must be kept in sync with which providers override
+// `launch()` in src-tauri/src/providers/*.rs. Every other launcher has no
+// verified per-game exe path, so no Launch button is shown for it rather
+// than one that would always error.
+const LAUNCHABLE_LAUNCHERS = new Set(["steam", "gog", "ea", "ubisoft"]);
+
 const REFRESH_INTERVAL_KEY = "lp.refreshIntervalMinutes";
 const DEFAULT_REFRESH_MINUTES = 30;
 const ONBOARDING_SEEN_KEY = "lp.onboardingSeen";
@@ -130,11 +138,37 @@ function buildGameRow(game: Game): HTMLElement {
     const updateSize = document.createElement("span");
     updateSize.className = "update-size";
     updateSize.textContent = formatSize(null);
-    const btn = document.createElement("button");
-    btn.className = "btn-update";
-    btn.textContent = "Update";
-    btn.onclick = () => invoke("trigger_update", { launcher: game.launcher, gameId: game.id });
-    row.append(updateSize, btn);
+    row.append(updateSize);
+
+    // Only "update_available" gets the amber Update button — amber means
+    // actionable (see the palette comment in styles.css), and re-triggering
+    // an update that's already in progress isn't a real action.
+    if (game.status === "update_available") {
+      const btn = document.createElement("button");
+      btn.className = "btn-update";
+      btn.textContent = "Update";
+      btn.onclick = () => invoke("trigger_update", { launcher: game.launcher, gameId: game.id });
+      row.append(btn);
+    }
+  }
+
+  if (LAUNCHABLE_LAUNCHERS.has(game.launcher)) {
+    const launchBtn = document.createElement("button");
+    launchBtn.className = "btn-launch";
+    launchBtn.textContent = "Launch";
+    launchBtn.onclick = () => {
+      invoke("launch_game", { launcher: game.launcher, gameId: game.id }).catch((err) => {
+        // Real feedback on failure instead of a silent no-op click — reverts
+        // after a beat so the button stays usable for a retry.
+        launchBtn.textContent = "Launch failed";
+        launchBtn.title = String(err);
+        setTimeout(() => {
+          launchBtn.textContent = "Launch";
+          launchBtn.title = "";
+        }, 2500);
+      });
+    };
+    row.append(launchBtn);
   }
 
   return row;
