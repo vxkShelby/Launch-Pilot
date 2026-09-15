@@ -263,3 +263,15 @@ pub fn trigger_update(launcher: String, game_id: String) -> Result<(), String> {
         .ok_or_else(|| format!("unknown launcher: {launcher}"))?;
     provider.trigger_update(&game_id)
 }
+
+#[tauri::command]
+pub fn launch_game(launcher: String, game_id: String) -> Result<(), String> {
+    if !is_safe_id(&game_id) {
+        return Err("invalid game id".to_string());
+    }
+    let provider = all_providers()
+        .into_iter()
+        .find(|p| p.id() == launcher)
+        .ok_or_else(|| format!("unknown launcher: {launcher}"))?;
+    provider.launch(&game_id)
+}

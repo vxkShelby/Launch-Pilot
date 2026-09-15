@@ -177,4 +177,11 @@ impl LauncherProvider for GogProvider {
         let exe: String = hklm.open_subkey(GAMES_KEY).ok()?.open_subkey(game_id).ok()?.get_value("exe").ok()?;
         Some(std::path::PathBuf::from(exe))
     }
+
+    // Same real exe path already resolved for the game's icon — no separate
+    // launch-target heuristic.
+    fn launch(&self, game_id: &str) -> Result<(), String> {
+        let path = self.game_icon_source(game_id).ok_or("no verified exe path for this game")?;
+        std::process::Command::new(&path).spawn().map(|_| ()).map_err(|e| e.to_string())
+    }
 }

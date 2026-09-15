@@ -279,4 +279,11 @@ impl LauncherProvider for UbisoftProvider {
     fn trigger_update(&self, _game_id: &str) -> Result<(), String> {
         open::that("uplay://").map_err(|e| e.to_string())
     }
+
+    // Same real exe path already resolved for the game's icon (native or
+    // Steam-cross-detected) — no separate launch-target heuristic.
+    fn launch(&self, game_id: &str) -> Result<(), String> {
+        let path = self.game_icon_source(game_id).ok_or("no verified exe path for this game")?;
+        std::process::Command::new(&path).spawn().map(|_| ()).map_err(|e| e.to_string())
+    }
 }

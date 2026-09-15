@@ -75,6 +75,14 @@ pub trait LauncherProvider: Send + Sync {
     fn game_icon_source(&self, _game_id: &str) -> Option<std::path::PathBuf> {
         None
     }
+    /// Launch one specific game's own exe — spawns the exact same real
+    /// local path `game_icon_source` already resolves for that game, never
+    /// a separate heuristic. Err(_) by default for providers with no
+    /// verified per-game exe path, same honesty rule as `game_icon_source`:
+    /// no guessing a launch target that was never confirmed on disk.
+    fn launch(&self, _game_id: &str) -> Result<(), String> {
+        Err("launch not supported for this launcher".to_string())
+    }
 }
 
 /// Disclosed heuristic shared by providers that know a game's install
