@@ -30,7 +30,7 @@ whether an update is pending, LaunchPilot says **Unknown** instead of guessing.
 | Launcher | Detect | Game list | Update status | Trigger |
 |---|:---:|:---:|:---:|---|
 | **Steam** | ✅ | ✅ | ✅ (`StateFlags` + buildid) | `steam://validate/<appid>` |
-| **Epic Games** | ✅ | ✅ | — *(no local field exists)* | `com.epicgames.launcher://apps/<id>` |
+| **Epic Games** | ✅ | ✅ | ✅ live "Updating" (`bIsIncompleteInstall` + staging writes) | `com.epicgames.launcher://apps/<id>` |
 | **GOG Galaxy** | ✅ | ✅ | ✅ live (`content-system.gog.com`, no login) | `goggalaxy://openGameView/<id>` |
 | **Riot Client** | ✅ | ✅ (light) | — *(no local field exists)* | launches `RiotClientServices.exe` |
 | **EA app** | ✅ | ✅ (registry) | ✅ live "Updating" (`.tmp` staging files) | `origin2://` (opens client) |

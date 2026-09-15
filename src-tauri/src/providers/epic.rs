@@ -9,11 +9,31 @@
 // Non-game items (engine installs, plugins) show bIsApplication=false, which
 // is how we filter them out.
 //
-// Update status: Epic's manifest carries no "update available" field and
-// there's no public API for it — this is the honest Unknown case the spec
-// calls for. trigger_update deep-links into the game's page via Epic's own
-// documented app protocol (used by Epic for its "Add to Library" shortcuts),
-// which at minimum surfaces any pending update to the user.
+// Live update-in-progress detection: REAL field, verified live on this
+// machine — every .item file (checked all 3 present here: an Unreal Engine
+// install plus its Fab/Quixel plugin components) carries a top-level
+// `bIsIncompleteInstall` boolean, currently false on all of them (nothing
+// mid-download right now). This is Epic's own explicit flag, not an
+// inferred one — independently corroborated by a third-party writeup of the
+// same .item schema (jayd.ml/games/2020/05/16/epic-games-store-steam-libraries.html),
+// which documents both `bIsIncompleteInstall` and `StagingLocation` (the
+// folder Epic stages an active download's chunks into — verified live here
+// too, e.g. "V:\UE_5.8\.egstore/bps").
+//
+// Same caveat the EA provider already hit and fixed (see ea.rs): the flag
+// alone only means an install/update was started and hasn't finished —
+// that covers a paused or abandoned download too, not just one actively
+// streaming bytes right now. No installed item here has ever been left
+// mid-download, so that distinction can't be observed live end-to-end; the
+// same recency check ea.rs verified live is applied defensively — only a
+// StagingLocation with a file written in the last few seconds counts as
+// Updating. bIsIncompleteInstall=true with no recent write stays Unknown
+// rather than guessing at a pending-but-not-active state (no evidence Epic's
+// schema distinguishes one), which also keeps this within the task's
+// Updating-only scope, not a fabricated UpdateAvailable.
+//
+// Update status otherwise: no field gives "latest available version" for a
+// specific game — honest Unknown, same as before.
 use super::{Game, LauncherProvider, UpdateStatus};
 use serde::Deserialize;
 use std::path::PathBuf;
@@ -30,6 +50,15 @@ struct EpicItem {
     install_size: Option<u64>,
     #[serde(rename = "bIsApplication")]
     is_application: bool,
+    // Both defaulted rather than required: only the 3 manifests on this
+    // machine were verified to carry them (CORROBORATED elsewhere, not an
+    // official Epic schema doc) — an older/different manifest missing either
+    // field should fall back to the prior "Unknown, still listed" behavior,
+    // not silently drop the whole game from the list.
+    #[serde(rename = "bIsIncompleteInstall", default)]
+    is_incomplete_install: bool,
+    #[serde(rename = "StagingLocation", default)]
+    staging_location: String,
 }
 
 pub struct EpicProvider;
@@ -38,6 +67,27 @@ impl EpicProvider {
     fn manifests_dir(&self) -> Option<PathBuf> {
         let program_data = std::env::var("ProgramData").ok()?;
         Some(PathBuf::from(program_data).join("Epic\\EpicGamesLauncher\\Data\\Manifests"))
+    }
+
+    /// True if any file directly under `staging_location` was written in the
+    /// last few seconds — the same "is it actively streaming bytes right
+    /// now" recency check ea.rs uses for its .tmp staging files, applied
+    /// here since Epic's own bIsIncompleteInstall flag doesn't by itself
+    /// distinguish "downloading right now" from "started once, now stalled."
+    fn is_actively_staging(staging_location: &str) -> bool {
+        if staging_location.is_empty() {
+            return false;
+        }
+        let Ok(entries) = std::fs::read_dir(staging_location) else {
+            return false;
+        };
+        const ACTIVE_WINDOW: std::time::Duration = std::time::Duration::from_secs(10);
+        let now = std::time::SystemTime::now();
+        entries.flatten().any(|e| {
+            e.metadata()
+                .and_then(|m| m.modified())
+                .is_ok_and(|modified| now.duration_since(modified).is_ok_and(|age| age < ACTIVE_WINDOW))
+        })
     }
 }
 
@@ -77,12 +127,17 @@ impl LauncherProvider for EpicProvider {
             if !item.is_application {
                 continue;
             }
+            let status = if item.is_incomplete_install && Self::is_actively_staging(&item.staging_location) {
+                UpdateStatus::Updating
+            } else {
+                UpdateStatus::Unknown
+            };
             games.push(Game {
                 launcher: "epic",
                 id: item.app_name,
                 name: item.display_name,
                 installed_build: Some(item.app_version),
-                status: UpdateStatus::Unknown,
+                status,
                 size_bytes: item.install_size,
                 last_updated: None,
             });
