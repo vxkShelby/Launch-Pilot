@@ -280,33 +280,22 @@ impl LauncherProvider for UbisoftProvider {
         open::that("uplay://").map_err(|e| e.to_string())
     }
 
-    // Same real exe path already resolved for the game's icon (native or
-    // Steam-cross-detected) — EXCEPT for the Steam-cross-detected case,
-    // where the same InstallScripts guard steam.rs's launch() applies is
-    // repeated here: find_main_exe scanning a Steam-managed folder can pick
-    // a Steam-invoked setup stub instead of the real game exe when the
-    // manifest carries "InstallScripts" (reproduced live for a different
-    // game, 3DMark — see steam.rs). Native Ubisoft installs (InstallDir
-    // from Ubisoft's own registry, not Steam's) aren't affected, so only
-    // the steam-{appid} id shape gets this check.
+    // Steam-cross-detected games (steam-{appid}) are launched the same way
+    // steam.rs now launches every Steam game: steam://rungameid/<appid>,
+    // Valve's own documented protocol (same one Steam's store-page "Play"
+    // button uses), so Steam itself resolves the real launch target instead
+    // of LaunchPilot guessing one via find_main_exe. This replaces an
+    // earlier exe-spawn approach that crashed live for a Steam-cross-
+    // detected-style manifest (3DMark, reproduced on this machine — see
+    // steam.rs): a game whose manifest carries "InstallScripts" has no
+    // single main exe, and the heuristic picked a Steam-invoked setup stub
+    // that crashes standalone. rungameid hands that entirely to Steam, so
+    // no InstallScripts guard is needed here anymore. Native Ubisoft
+    // installs (InstallDir from Ubisoft's own registry, not Steam's) don't
+    // go through Steam at all, so that branch is untouched.
     fn launch(&self, game_id: &str) -> Result<(), String> {
         if let Some(appid) = game_id.strip_prefix("steam-") {
-            let Some(steam_path) = Self::steam_path() else {
-                return Err("Steam not installed".to_string());
-            };
-            for library in Self::library_paths(&steam_path) {
-                let manifest = library.join("steamapps").join(format!("appmanifest_{appid}.acf"));
-                let Ok(content) = std::fs::read_to_string(&manifest) else {
-                    continue;
-                };
-                let has_install_script = vdf::parse(&content)
-                    .and_then(|root| root.get("AppState").and_then(|v| v.as_block()).map(|s| s.get("InstallScripts").is_some()))
-                    .unwrap_or(false);
-                if has_install_script {
-                    return Err("this game uses a custom Steam install script — no verified launch target, open it from Steam instead".to_string());
-                }
-                break;
-            }
+            return open::that(format!("steam://rungameid/{appid}")).map_err(|e| e.to_string());
         }
         let path = self.game_icon_source(game_id).ok_or("no verified exe path for this game")?;
         std::process::Command::new(&path).spawn().map(|_| ()).map_err(|e| e.to_string())
