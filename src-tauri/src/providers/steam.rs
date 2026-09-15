@@ -187,9 +187,31 @@ impl LauncherProvider for SteamProvider {
         open::that(format!("steam://validate/{game_id}")).map_err(|e| e.to_string())
     }
 
-    // Same real exe path already resolved for the game's icon — no separate
-    // launch-target heuristic.
+    // Same real exe path already resolved for the game's icon — EXCEPT
+    // reproduced live on this machine: a game whose manifest carries
+    // "InstallScripts" (Steam's own signal for a custom third-party install
+    // wrapper) can have find_main_exe's heuristic pick a Steam-invoked setup
+    // stub as its only top-level exe. For 3DMark, that stub
+    // (SystemInfoSetupAssistant.exe) crashes with STATUS_ACCESS_VIOLATION
+    // (0xC0000005) when run standalone outside Steam's own install flow —
+    // verified by launching it directly. A wrong icon from that same path
+    // is harmless (game_icon_source is left as-is), but actually executing
+    // it isn't, so launch() alone refuses rather than guessing.
     fn launch(&self, game_id: &str) -> Result<(), String> {
+        let steam_path = self.steam_path().ok_or("Steam not installed")?;
+        for library in self.library_paths(&steam_path) {
+            let manifest = library.join("steamapps").join(format!("appmanifest_{game_id}.acf"));
+            let Ok(content) = std::fs::read_to_string(&manifest) else {
+                continue;
+            };
+            let has_install_script = crate::vdf::parse(&content)
+                .and_then(|root| root.get("AppState").and_then(|v| v.as_block()).map(|s| s.get("InstallScripts").is_some()))
+                .unwrap_or(false);
+            if has_install_script {
+                return Err("this game uses a custom Steam install script — no verified launch target, open it from Steam instead".to_string());
+            }
+            break;
+        }
         let path = self.game_icon_source(game_id).ok_or("no verified exe path for this game")?;
         std::process::Command::new(&path).spawn().map(|_| ()).map_err(|e| e.to_string())
     }
