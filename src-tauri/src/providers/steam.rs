@@ -9,7 +9,13 @@
 // Update detection: Steam's own "StateFlags" bitfield (values verified
 // against a real install, not guessed):
 //   1=Uninstalled 2=UpdateRequired 4=FullyInstalled 8=Encrypted 16=Locked
-//   32=FilesMissing 64=AppRunning 128=FilesCorrupt 256=UpdateRunning
+//   32=FilesMissing 64=AppRunning 128=FilesCorrupt
+// The "actively downloading right now" bit is 1024, not the 256 this file
+// previously assumed (an older, unverified guess) — corrected after a real
+// user's live StateFlags dump showed every merely-queued pending update at
+// StateFlags=6 (2|4) while the two games actually mid-download that moment
+// both read 1030 (2|4|1024), confirmed live against Steam's own progress
+// bars for those exact two titles (RoadCraft, War Thunder) on 2026-09-19.
 // A game also carries "buildid" (installed) vs "TargetBuildID" (what Steam
 // wants installed next); TargetBuildID is "0" when Steam hasn't queued one.
 use super::{Game, LauncherProvider, UpdateStatus};
@@ -18,7 +24,7 @@ use std::path::{Path, PathBuf};
 
 const STATE_UPDATE_REQUIRED: u64 = 2;
 const STATE_FULLY_INSTALLED: u64 = 4;
-const STATE_UPDATE_RUNNING: u64 = 256;
+const STATE_UPDATE_RUNNING: u64 = 1024;
 
 pub struct SteamProvider;
 
@@ -71,17 +77,16 @@ impl SteamProvider {
         let buildid = state.get("buildid").and_then(|v| v.as_str());
         let target_buildid = state.get("TargetBuildID").and_then(|v| v.as_str());
 
-        // UpdateRunning (256) means Steam is actively streaming bytes for
-        // this game right now — per Valve's own bit meanings (see file-top
-        // comment), checked before UpdateRequired (2) since a mid-download
-        // game plausibly still carries UpdateRequired too (queued-and-
-        // pending and actively-downloading aren't documented as mutually
-        // exclusive). Real bug this fixes, reported by a user: this bit was
-        // defined in the file-top comment but never actually tested, so an
-        // actively-updating game fell through to UpdateAvailable/UpToDate
-        // instead of Updating. Not independently re-verified live against a
-        // real in-progress download on this machine (none was running at
-        // fix time) — flag solely on Valve's documented bit semantics.
+        // Bit 1024 means Steam is actively streaming bytes for this game
+        // right now — checked before UpdateRequired (2), which every
+        // observed mid-download game also carried (both bits set together:
+        // 1030 = 1024|4|2). Real bug fixed here, reported by a user: an
+        // earlier version of this check tested bit 256 instead, a guess
+        // that turned out wrong — a live StateFlags dump from that user's
+        // own machine (see file-top comment) never showed 256 anywhere, and
+        // showed 1024 set on exactly the two games actively downloading at
+        // that moment (confirmed against Steam's own progress bars for
+        // those two), with every other pending-but-queued game at a plain 6.
         let status = if flags & STATE_UPDATE_RUNNING != 0 {
             UpdateStatus::Updating
         } else if flags & STATE_UPDATE_REQUIRED != 0 {
