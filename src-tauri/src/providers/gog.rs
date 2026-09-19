@@ -98,6 +98,20 @@ impl LauncherProvider for GogProvider {
             let Ok(name) = game_key.get_value::<String, _>("gameName") else {
                 continue;
             };
+
+            // Real bug report: a game the user removed still showed up here.
+            // GOG's own uninstaller is supposed to delete this whole subkey,
+            // but doesn't always (a manually-deleted install folder, or an
+            // interrupted uninstall, leaves the registry key behind) — this
+            // key alone was never proof the game is still actually there.
+            // `path` is the same real per-game field `game_icon_source`
+            // already trusts for the exe; skip the entry if that folder is
+            // gone rather than reporting an install that no longer exists.
+            let path: String = game_key.get_value("path").unwrap_or_default();
+            if !path.is_empty() && !std::path::Path::new(&path).exists() {
+                continue;
+            }
+
             let version: Option<String> = game_key.get_value("ver").ok();
             let build_id: Option<String> = game_key.get_value("BUILDID").ok();
             entries.push(Entry { id, name, version, build_id });

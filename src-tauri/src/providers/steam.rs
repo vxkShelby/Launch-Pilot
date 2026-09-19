@@ -18,6 +18,7 @@ use std::path::{Path, PathBuf};
 
 const STATE_UPDATE_REQUIRED: u64 = 2;
 const STATE_FULLY_INSTALLED: u64 = 4;
+const STATE_UPDATE_RUNNING: u64 = 256;
 
 pub struct SteamProvider;
 
@@ -70,7 +71,20 @@ impl SteamProvider {
         let buildid = state.get("buildid").and_then(|v| v.as_str());
         let target_buildid = state.get("TargetBuildID").and_then(|v| v.as_str());
 
-        let status = if flags & STATE_UPDATE_REQUIRED != 0 {
+        // UpdateRunning (256) means Steam is actively streaming bytes for
+        // this game right now — per Valve's own bit meanings (see file-top
+        // comment), checked before UpdateRequired (2) since a mid-download
+        // game plausibly still carries UpdateRequired too (queued-and-
+        // pending and actively-downloading aren't documented as mutually
+        // exclusive). Real bug this fixes, reported by a user: this bit was
+        // defined in the file-top comment but never actually tested, so an
+        // actively-updating game fell through to UpdateAvailable/UpToDate
+        // instead of Updating. Not independently re-verified live against a
+        // real in-progress download on this machine (none was running at
+        // fix time) — flag solely on Valve's documented bit semantics.
+        let status = if flags & STATE_UPDATE_RUNNING != 0 {
+            UpdateStatus::Updating
+        } else if flags & STATE_UPDATE_REQUIRED != 0 {
             UpdateStatus::UpdateAvailable
         } else if let (Some(b), Some(t)) = (buildid, target_buildid) {
             if t != "0" && t != b {
