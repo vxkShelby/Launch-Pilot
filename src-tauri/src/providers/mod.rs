@@ -119,6 +119,18 @@ pub fn find_main_exe(dir: &std::path::Path) -> Option<std::path::PathBuf> {
     candidates.into_iter().max_by_key(|(_, size)| *size).map(|(path, _)| path)
 }
 
+/// True if `path` exists and was last modified within `window` of now — the
+/// "is it actively streaming bytes right now" recency check shared by
+/// epic.rs (a staging-folder file) and ea.rs (a per-component .tmp file),
+/// each of which independently implemented this same predicate over their
+/// own, differently-shaped directory scan.
+pub fn is_recently_modified(path: &std::path::Path, window: std::time::Duration) -> bool {
+    let now = std::time::SystemTime::now();
+    std::fs::metadata(path)
+        .and_then(|m| m.modified())
+        .is_ok_and(|modified| now.duration_since(modified).is_ok_and(|age| age < window))
+}
+
 pub fn all_providers() -> Vec<Box<dyn LauncherProvider>> {
     vec![
         Box::new(steam::SteamProvider),

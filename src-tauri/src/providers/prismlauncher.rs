@@ -223,6 +223,22 @@ impl PrismLauncherProvider {
         None
     }
 
+    /// Checks one mod's latest Modrinth version against the version it was
+    /// pinned to in the pack index. None means it couldn't be checked
+    /// (network failure, bad response) — same as `continue` in the old
+    /// sequential loop.
+    fn check_one_mod(client: &reqwest::blocking::Client, project_id: &str, version_id: &str) -> Option<bool> {
+        let resp = client.get(format!("https://api.modrinth.com/v2/project/{project_id}/version")).send().ok()?;
+        let versions = resp.json::<Vec<ModrinthVersion>>().ok()?;
+        Some(versions.first().is_some_and(|latest| latest.id != version_id))
+    }
+
+    /// Same three-way logic the old sequential loop used — UpdateAvailable
+    /// if any mod needs one, else UpToDate if at least one was successfully
+    /// checked, else Unknown — but fans the per-mod network calls out
+    /// concurrently (same `thread::scope` + `scope.spawn` + `.join()`
+    /// pattern gog.rs already uses for its own one-call-per-item problem)
+    /// instead of making them one at a time.
     fn mod_update_status(instance_path: &Path) -> UpdateStatus {
         let Some(index_path) = Self::find_modrinth_index(instance_path) else {
             return UpdateStatus::Unknown;
@@ -237,26 +253,24 @@ impl PrismLauncherProvider {
             return UpdateStatus::Unknown;
         };
 
-        let mut checked_any = false;
-        for file in &index.files {
-            let Some(download_url) = file.downloads.first() else {
-                continue;
-            };
-            let Some((project_id, version_id)) = Self::parse_modrinth_url(download_url) else {
-                continue;
-            };
-            let Ok(resp) = client.get(format!("https://api.modrinth.com/v2/project/{project_id}/version")).send() else {
-                continue;
-            };
-            let Ok(versions) = resp.json::<Vec<ModrinthVersion>>() else {
-                continue;
-            };
-            checked_any = true;
-            if versions.first().is_some_and(|latest| latest.id != version_id) {
-                return UpdateStatus::UpdateAvailable;
-            }
-        }
-        if checked_any {
+        let checks: Vec<(String, String)> = index
+            .files
+            .iter()
+            .filter_map(|file| Self::parse_modrinth_url(file.downloads.first()?))
+            .collect();
+
+        let results: Vec<Option<bool>> = std::thread::scope(|scope| {
+            let handles: Vec<_> = checks
+                .iter()
+                .map(|(project_id, version_id)| scope.spawn(|| Self::check_one_mod(&client, project_id, version_id)))
+                .collect();
+            handles.into_iter().map(|h| h.join().unwrap_or(None)).collect()
+        });
+
+        let checked_any = results.iter().any(|r| r.is_some());
+        if results.iter().any(|r| *r == Some(true)) {
+            UpdateStatus::UpdateAvailable
+        } else if checked_any {
             UpdateStatus::UpToDate
         } else {
             UpdateStatus::Unknown

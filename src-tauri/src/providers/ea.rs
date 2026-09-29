@@ -74,7 +74,6 @@ impl EaProvider {
             return UpdateStatus::Unknown;
         };
         const ACTIVE_WINDOW: std::time::Duration = std::time::Duration::from_secs(10);
-        let now = std::time::SystemTime::now();
 
         let mut found_pending = false;
         for component in components.flatten() {
@@ -86,11 +85,7 @@ impl EaProvider {
                     continue;
                 }
                 found_pending = true;
-                let is_actively_written = f
-                    .metadata()
-                    .and_then(|m| m.modified())
-                    .is_ok_and(|modified| now.duration_since(modified).is_ok_and(|age| age < ACTIVE_WINDOW));
-                if is_actively_written {
+                if super::is_recently_modified(&f.path(), ACTIVE_WINDOW) {
                     return UpdateStatus::Updating;
                 }
             }

@@ -82,12 +82,7 @@ impl EpicProvider {
             return false;
         };
         const ACTIVE_WINDOW: std::time::Duration = std::time::Duration::from_secs(10);
-        let now = std::time::SystemTime::now();
-        entries.flatten().any(|e| {
-            e.metadata()
-                .and_then(|m| m.modified())
-                .is_ok_and(|modified| now.duration_since(modified).is_ok_and(|age| age < ACTIVE_WINDOW))
-        })
+        entries.flatten().any(|e| super::is_recently_modified(&e.path(), ACTIVE_WINDOW))
     }
 }
 

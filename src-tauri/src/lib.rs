@@ -1,6 +1,7 @@
 mod commands;
 mod ini;
 mod providers;
+mod steam_common;
 mod vdf;
 
 // panic = "abort" in the release profile still runs this hook first, it just

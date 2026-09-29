@@ -60,26 +60,36 @@ impl BattleNetProvider {
         Some(std::path::PathBuf::from(local_appdata).join("Battle.net\\Logs"))
     }
 
-    /// True if the most recent line for this agent_uid shows an update
-    /// currently running. Only scans the newest log file, and only its
-    /// tail, to stay cheap on repeated dashboard refreshes.
-    fn is_updating(agent_uid: &str) -> bool {
-        let Some(dir) = Self::logs_dir() else {
-            return false;
-        };
-        let Ok(entries) = std::fs::read_dir(&dir) else {
-            return false;
-        };
-        let Some(latest) = entries
+    /// Reads the newest log file's full contents once. Returns None if the
+    /// logs directory, newest file, or its contents can't be found/read —
+    /// callers fall back to the same honest Unknown a per-game read failure
+    /// used to produce.
+    ///
+    /// Previously this read (and rescanned) the newest log file separately
+    /// for every installed game via a since-removed `is_updating(uid)`
+    /// method — for N games that meant N re-reads of the same (potentially
+    /// large) file in one `list_games()` call. Read once, reuse for every
+    /// game's lookup instead.
+    ///
+    /// Note: despite the old comment claiming this "only scans the newest
+    /// file's tail", the code has always read the newest file's entire
+    /// contents into a String — this doc now matches that actual behavior.
+    fn latest_log_content() -> Option<String> {
+        let dir = Self::logs_dir()?;
+        let entries = std::fs::read_dir(&dir).ok()?;
+        let latest = entries
             .flatten()
             .filter(|e| e.path().extension().and_then(|x| x.to_str()) == Some("log"))
-            .max_by_key(|e| e.metadata().and_then(|m| m.modified()).ok())
-        else {
-            return false;
-        };
-        let Ok(content) = std::fs::read_to_string(latest.path()) else {
-            return false;
-        };
+            .max_by_key(|e| e.metadata().and_then(|m| m.modified()).ok())?;
+        std::fs::read_to_string(latest.path()).ok()
+    }
+
+    /// True if the most recent line for this agent_uid, within already-read
+    /// log content, shows an update currently running. Same matching logic
+    /// the old per-game `is_updating` used (substring marker, most recent
+    /// matching line wins) — now runs in memory against content read once
+    /// per `list_games()` call instead of once per game.
+    fn is_updating(content: &str, agent_uid: &str) -> bool {
         let marker = format!("agentUid={agent_uid}");
         content
             .lines()
@@ -107,6 +117,9 @@ impl LauncherProvider for BattleNetProvider {
     fn list_games(&self) -> Result<Vec<Game>, String> {
         let hklm = RegKey::predef(HKEY_LOCAL_MACHINE);
         let mut games = Vec::new();
+        // Read the newest log once up front rather than once per installed
+        // game — see latest_log_content's doc comment.
+        let log_content = Self::latest_log_content();
 
         for uninstall_path in UNINSTALL_KEYS {
             let Ok(uninstall_key) = hklm.open_subkey(uninstall_path) else {
@@ -142,7 +155,11 @@ impl LauncherProvider for BattleNetProvider {
                     id: uid.to_string(),
                     name,
                     installed_build: version,
-                    status: if Self::is_updating(uid) { UpdateStatus::Updating } else { UpdateStatus::Unknown },
+                    status: if log_content.as_deref().is_some_and(|c| Self::is_updating(c, uid)) {
+                        UpdateStatus::Updating
+                    } else {
+                        UpdateStatus::Unknown
+                    },
                     size_bytes: None,
                     last_updated: None,
                 });
