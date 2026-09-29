@@ -82,6 +82,7 @@ pub struct ProviderResult {
     pub name: &'static str,
     pub games: Vec<Game>,
     pub running: bool,
+    pub can_launch: bool,
 }
 
 /// Reads the real icon Windows itself associates with a local exe/file
@@ -240,6 +241,7 @@ pub fn provider_data(launcher: String) -> Option<ProviderResult> {
         name: provider.display_name(),
         games,
         running: is_running,
+        can_launch: provider.supports_launch(),
     })
 }
 

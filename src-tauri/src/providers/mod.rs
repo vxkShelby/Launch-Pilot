@@ -83,6 +83,15 @@ pub trait LauncherProvider: Send + Sync {
     fn launch(&self, _game_id: &str) -> Result<(), String> {
         Err("launch not supported for this launcher".to_string())
     }
+    /// Whether this provider overrides `launch()` with a real implementation.
+    /// The authoritative answer to "can the frontend show a Launch button for
+    /// this launcher" — false by default, true only for the providers that
+    /// actually override `launch()` above. Exists so the frontend reads this
+    /// off `ProviderResult` instead of hand-maintaining its own copy of which
+    /// launchers support launching.
+    fn supports_launch(&self) -> bool {
+        false
+    }
 }
 
 /// Disclosed heuristic shared by providers that know a game's install

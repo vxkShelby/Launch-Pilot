@@ -209,4 +209,8 @@ impl LauncherProvider for GogProvider {
         let path = self.game_icon_source(game_id).ok_or("no verified exe path for this game")?;
         std::process::Command::new(&path).spawn().map(|_| ()).map_err(|e| e.to_string())
     }
+
+    fn supports_launch(&self) -> bool {
+        true
+    }
 }

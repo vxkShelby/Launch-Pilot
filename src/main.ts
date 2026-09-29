@@ -19,6 +19,7 @@ interface ProviderResult {
   name: string;
   games: Game[];
   running: boolean;
+  can_launch: boolean;
 }
 
 const STATUS_LABEL: Record<UpdateStatus, string> = {
@@ -41,20 +42,18 @@ const LAUNCHER_LABEL: Record<string, string> = {
   ageofthering: "Age of the Ring",
 };
 
-// Launchers whose provider implements a real, verified per-game exe path
-// (LauncherProvider::game_icon_source in Rust) and therefore a real
-// `launch_game` — must be kept in sync with which providers override
-// `launch()` in src-tauri/src/providers/*.rs. Every other launcher has no
-// verified per-game exe path, so no Launch button is shown for it rather
-// than one that would always error.
-const LAUNCHABLE_LAUNCHERS = new Set(["steam", "gog", "ea", "ubisoft"]);
-
 const REFRESH_INTERVAL_KEY = "lp.refreshIntervalMinutes";
 const DEFAULT_REFRESH_MINUTES = 30;
 const ONBOARDING_SEEN_KEY = "lp.onboardingSeen";
 
 let allGames: Game[] = [];
 let runningLaunchers: Set<string> = new Set();
+// Per-launcher can_launch from ProviderResult, mirrored into a Set the same
+// way runningLaunchers mirrors ProviderResult.running — the authoritative
+// backend answer to "does this launcher's provider override launch()",
+// replacing a hand-maintained LAUNCHABLE_LAUNCHERS id list that had to be
+// kept in sync by hand and would silently miss a new launcher.
+let canLaunchLaunchers: Set<string> = new Set();
 let refreshTimer: number | undefined;
 let loadRequestId = 0;
 
@@ -152,7 +151,7 @@ function buildGameRow(game: Game): HTMLElement {
     }
   }
 
-  if (LAUNCHABLE_LAUNCHERS.has(game.launcher)) {
+  if (canLaunchLaunchers.has(game.launcher)) {
     const launchBtn = document.createElement("button");
     launchBtn.className = "btn-launch";
     launchBtn.textContent = "Launch";
@@ -174,7 +173,7 @@ function buildGameRow(game: Game): HTMLElement {
   return row;
 }
 
-function buildLauncherSection(launcher: string, games: Game[]): HTMLElement {
+function buildLauncherSection(launcher: string, games: Game[], name: string): HTMLElement {
   const needsUpdate = games.filter((g) => g.status === "update_available" || g.status === "updating");
   const rest = games.filter((g) => g.status !== "update_available" && g.status !== "updating");
 
@@ -188,7 +187,7 @@ function buildLauncherSection(launcher: string, games: Game[]): HTMLElement {
 
   const title = document.createElement("span");
   title.className = "lane-title";
-  title.textContent = LAUNCHER_LABEL[launcher] ?? launcher;
+  title.textContent = LAUNCHER_LABEL[launcher] ?? name;
   summary.appendChild(title);
 
   if (needsUpdate.length > 0) {
@@ -311,6 +310,7 @@ async function loadGames() {
 
   allGames = [];
   runningLaunchers = new Set();
+  canLaunchLaunchers = new Set();
   listEl.innerHTML = "";
   updateStats();
 
@@ -332,6 +332,7 @@ async function loadGames() {
 
         const placeholder = placeholders.get(id);
         if (result && result.running) runningLaunchers.add(id);
+        if (result && result.can_launch) canLaunchLaunchers.add(id);
 
         if (failed) {
           // Real check errored (not just "launcher absent") — say so instead
@@ -345,7 +346,7 @@ async function loadGames() {
         } else {
           const games = [...result.games].sort((a, b) => a.name.localeCompare(b.name));
           allGames.push(...games);
-          placeholder?.replaceWith(buildLauncherSection(id, games));
+          placeholder?.replaceWith(buildLauncherSection(id, games, result.name));
         }
 
         updateStats();

@@ -198,4 +198,8 @@ impl LauncherProvider for SteamProvider {
     fn launch(&self, game_id: &str) -> Result<(), String> {
         open::that(format!("steam://rungameid/{game_id}")).map_err(|e| e.to_string())
     }
+
+    fn supports_launch(&self) -> bool {
+        true
+    }
 }
