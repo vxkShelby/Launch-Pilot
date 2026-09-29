@@ -352,3 +352,78 @@ impl LauncherProvider for PrismLauncherProvider {
             .map_err(|e| e.to_string())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn version_triplet_ignores_trailing_build_revision() {
+        // The whole reason this function exists: the exe's own FileVersion
+        // carries a 4th component the GitHub tag doesn't, but both mean the
+        // same release.
+        assert_eq!(
+            PrismLauncherProvider::version_triplet("11.1.0.0"),
+            PrismLauncherProvider::version_triplet("11.1.0")
+        );
+    }
+
+    #[test]
+    fn version_triplet_strips_leading_v() {
+        assert_eq!(PrismLauncherProvider::version_triplet("v11.1.0"), vec![11, 1, 0]);
+    }
+
+    #[test]
+    fn version_triplet_empty_string_does_not_panic() {
+        assert_eq!(PrismLauncherProvider::version_triplet(""), Vec::<u32>::new());
+    }
+
+    #[test]
+    fn version_triplet_two_components_does_not_panic() {
+        assert_eq!(PrismLauncherProvider::version_triplet("11.1"), vec![11, 1]);
+    }
+
+    #[test]
+    fn parse_modrinth_url_extracts_project_and_version_id() {
+        let url = "https://cdn.modrinth.com/data/AANobbMI/versions/abc123/sodium.jar";
+        assert_eq!(
+            PrismLauncherProvider::parse_modrinth_url(url),
+            Some(("AANobbMI".to_string(), "abc123".to_string()))
+        );
+    }
+
+    #[test]
+    fn parse_modrinth_url_missing_versions_segment_returns_none() {
+        let url = "https://cdn.modrinth.com/data/AANobbMI/abc123/sodium.jar";
+        assert_eq!(PrismLauncherProvider::parse_modrinth_url(url), None);
+    }
+
+    #[test]
+    fn parse_modrinth_url_without_the_data_host_path_returns_none() {
+        let url = "https://example.com/not-modrinth-at-all";
+        assert_eq!(PrismLauncherProvider::parse_modrinth_url(url), None);
+    }
+
+    #[test]
+    fn parse_modrinth_url_rejects_traversal_in_project_id() {
+        // Security-fix regression: ".." in the id slot must not slip through.
+        let url = "https://cdn.modrinth.com/data/../versions/abc123/sodium.jar";
+        assert_eq!(PrismLauncherProvider::parse_modrinth_url(url), None);
+    }
+
+    #[test]
+    fn parse_modrinth_url_rejects_query_injection_in_version_id() {
+        let url = "https://cdn.modrinth.com/data/AANobbMI/versions/abc?evil=1/sodium.jar";
+        assert_eq!(PrismLauncherProvider::parse_modrinth_url(url), None);
+    }
+
+    #[test]
+    fn parse_modrinth_url_rejects_path_separator_smuggled_via_encoding_attempt() {
+        // A slash can't literally land inside one path segment, but a
+        // segment that's nothing but disallowed characters (e.g. an
+        // accidental double-slash producing an empty id) must still fail
+        // closed rather than be treated as valid.
+        let url = "https://cdn.modrinth.com/data//versions/abc123/sodium.jar";
+        assert_eq!(PrismLauncherProvider::parse_modrinth_url(url), None);
+    }
+}

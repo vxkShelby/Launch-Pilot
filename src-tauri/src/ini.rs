@@ -19,3 +19,47 @@ pub fn parse(input: &str) -> HashMap<String, String> {
     }
     map
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn empty_input_parses_to_empty_map() {
+        assert!(parse("").is_empty());
+    }
+
+    #[test]
+    fn section_header_and_key_value_pair() {
+        let map = parse("[General]\nInstanceDir=instances");
+        assert_eq!(map.get("InstanceDir"), Some(&"instances".to_string()));
+        // The section header itself is never inserted as a key.
+        assert_eq!(map.len(), 1);
+    }
+
+    #[test]
+    fn value_containing_equals_only_splits_on_the_first_one() {
+        let map = parse("path=C:\\x=y\\z");
+        assert_eq!(map.get("path"), Some(&"C:\\x=y\\z".to_string()));
+    }
+
+    #[test]
+    fn comment_line_is_ignored() {
+        let map = parse(";this is a comment\nname=value");
+        assert_eq!(map.len(), 1);
+        assert_eq!(map.get("name"), Some(&"value".to_string()));
+    }
+
+    #[test]
+    fn blank_lines_are_ignored() {
+        let map = parse("\n\nname=value\n\n");
+        assert_eq!(map.len(), 1);
+        assert_eq!(map.get("name"), Some(&"value".to_string()));
+    }
+
+    #[test]
+    fn whitespace_padded_key_and_value_are_trimmed() {
+        let map = parse("  name  =  value  ");
+        assert_eq!(map.get("name"), Some(&"value".to_string()));
+    }
+}

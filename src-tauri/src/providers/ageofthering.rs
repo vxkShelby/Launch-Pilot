@@ -53,14 +53,21 @@ impl AgeOfTheRingProvider {
         let root = exe_path.parent()?;
         let content = std::fs::read_to_string(root.join("aotr").join("ChangelistFormatted.txt")).ok()?;
         let first_line = content.lines().next()?;
-        // "== Version 9.3.3 - August 23rd 2026 ==" -> "9.3.3"
-        first_line
-            .split("Version")
-            .nth(1)?
-            .split('-')
-            .next()
-            .map(|s| s.trim().to_string())
+        extract_version(first_line)
     }
+}
+
+/// Pure parsing step pulled out of `version()` so it can be tested without a
+/// real changelog file on disk. "== Version 9.3.3 - August 23rd 2026 ==" ->
+/// "9.3.3". Fails closed (None) rather than guessing when the line doesn't
+/// contain the literal word "Version".
+fn extract_version(changelog_first_line: &str) -> Option<String> {
+    changelog_first_line
+        .split("Version")
+        .nth(1)?
+        .split('-')
+        .next()
+        .map(|s| s.trim().to_string())
 }
 
 impl LauncherProvider for AgeOfTheRingProvider {
@@ -115,5 +122,28 @@ impl LauncherProvider for AgeOfTheRingProvider {
             .spawn()
             .map(|_| ())
             .map_err(|e| e.to_string())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn extracts_version_from_the_real_observed_changelog_format() {
+        assert_eq!(
+            extract_version("== Version 9.3.3 - August 23rd 2026 =="),
+            Some("9.3.3".to_string())
+        );
+    }
+
+    #[test]
+    fn missing_the_version_word_fails_closed_to_none() {
+        assert_eq!(extract_version("== 9.3.3 - August 23rd 2026 =="), None);
+    }
+
+    #[test]
+    fn empty_line_fails_closed_to_none() {
+        assert_eq!(extract_version(""), None);
     }
 }

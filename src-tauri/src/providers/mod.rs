@@ -11,7 +11,7 @@ pub mod wargaming;
 
 use serde::Serialize;
 
-#[derive(Serialize, Clone, Copy, PartialEq, Eq)]
+#[derive(Serialize, Clone, Copy, PartialEq, Eq, Debug)]
 #[serde(rename_all = "snake_case")]
 pub enum UpdateStatus {
     UpToDate,
@@ -138,6 +138,76 @@ pub fn is_recently_modified(path: &std::path::Path, window: std::time::Duration)
     std::fs::metadata(path)
         .and_then(|m| m.modified())
         .is_ok_and(|modified| now.duration_since(modified).is_ok_and(|age| age < window))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::find_main_exe;
+    use std::fs;
+    use std::path::PathBuf;
+
+    /// A fresh, uniquely-named directory under the OS temp dir — no
+    /// `tempfile` crate needed, `std::env::temp_dir()` plus a name unique to
+    /// this test (and the process, so parallel `cargo test` runs never
+    /// collide) is enough. Caller is responsible for removing it; tests here
+    /// clean up at the end rather than via a drop guard, which is good
+    /// enough for a local/CI-only test that isn't touching production paths.
+    fn make_temp_dir(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("launchpilot_test_{name}_{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn skips_unins_prefixed_exe_and_falls_back_to_largest() {
+        let dir = make_temp_dir("skip_prefix");
+        // Bigger than the real game exe, to prove the prefix skip actually
+        // excludes it rather than it just losing on size.
+        fs::write(dir.join("unins000.exe"), vec![0u8; 5000]).unwrap();
+        fs::write(dir.join("MyGame.exe"), vec![0u8; 100]).unwrap();
+
+        let result = find_main_exe(&dir);
+
+        fs::remove_dir_all(&dir).unwrap();
+        assert_eq!(result, Some(dir.join("MyGame.exe")));
+    }
+
+    #[test]
+    fn prefers_exe_matching_folder_name_over_a_larger_file() {
+        let dir = make_temp_dir("CoolGame");
+        let folder_name = dir.file_name().unwrap().to_str().unwrap().to_string();
+        fs::write(dir.join(format!("{folder_name}.exe")), vec![0u8; 10]).unwrap();
+        fs::write(dir.join("other.exe"), vec![0u8; 99999]).unwrap();
+
+        let result = find_main_exe(&dir);
+
+        fs::remove_dir_all(&dir).unwrap();
+        assert_eq!(result, Some(dir.join(format!("{folder_name}.exe"))));
+    }
+
+    #[test]
+    fn falls_back_to_largest_exe_when_nothing_matches() {
+        let dir = make_temp_dir("largest_fallback");
+        fs::write(dir.join("small.exe"), vec![0u8; 10]).unwrap();
+        fs::write(dir.join("biggest.exe"), vec![0u8; 500]).unwrap();
+        fs::write(dir.join("medium.exe"), vec![0u8; 100]).unwrap();
+
+        let result = find_main_exe(&dir);
+
+        fs::remove_dir_all(&dir).unwrap();
+        assert_eq!(result, Some(dir.join("biggest.exe")));
+    }
+
+    #[test]
+    fn empty_directory_returns_none() {
+        let dir = make_temp_dir("empty_dir");
+
+        let result = find_main_exe(&dir);
+
+        fs::remove_dir_all(&dir).unwrap();
+        assert_eq!(result, None);
+    }
 }
 
 pub fn all_providers() -> Vec<Box<dyn LauncherProvider>> {

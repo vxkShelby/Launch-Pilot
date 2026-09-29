@@ -291,3 +291,41 @@ pub fn launch_game(launcher: String, game_id: String) -> Result<(), String> {
         .ok_or_else(|| format!("unknown launcher: {launcher}"))?;
     provider.launch(&game_id)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn empty_string_is_safe() {
+        assert!(is_safe_id(""));
+    }
+
+    #[test]
+    fn alphanumerics_and_allowed_punctuation_are_safe() {
+        assert!(is_safe_id("12345"));
+        assert!(is_safe_id("steam-76561198000000000"));
+        assert!(is_safe_id("some_id.v2"));
+    }
+
+    #[test]
+    fn exact_dot_and_dotdot_are_rejected() {
+        assert!(!is_safe_id("."));
+        assert!(!is_safe_id(".."));
+    }
+
+    #[test]
+    fn dot_and_dotdot_embedded_in_a_longer_id_are_still_safe() {
+        // Only the exact "." / ".." values are path-traversal special —
+        // a longer id built from allowed characters is not.
+        assert!(is_safe_id("..foo"));
+        assert!(is_safe_id("a.b..c"));
+    }
+
+    #[test]
+    fn shell_and_path_metacharacters_are_rejected() {
+        for id in ["with space", "a/b", "a\\b", "C:\\x", "a;b", "a&b", "a|b", "a\"b"] {
+            assert!(!is_safe_id(id), "expected {id:?} to be rejected");
+        }
+    }
+}

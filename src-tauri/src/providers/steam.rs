@@ -27,6 +27,41 @@ const STATE_UPDATE_REQUIRED: u64 = 2;
 const STATE_FULLY_INSTALLED: u64 = 4;
 const STATE_UPDATE_RUNNING: u64 = 1024;
 
+/// Standalone so it can be unit-tested directly against raw StateFlags/
+/// buildid combinations without needing a real manifest file on disk — this
+/// exact decision has already shipped two real bugs (see file-top comment),
+/// both caught only via a live user bug report, so it gets its own tests.
+///
+/// Bit 1024 means Steam is actively streaming bytes for this game right
+/// now — checked before UpdateRequired (2), which every observed
+/// mid-download game also carried (both bits set together: 1030 =
+/// 1024|4|2). Real bug fixed here, reported by a user: an earlier version
+/// of this check tested bit 256 instead, a guess that turned out wrong — a
+/// live StateFlags dump from that user's own machine (see file-top comment)
+/// never showed 256 anywhere, and showed 1024 set on exactly the two games
+/// actively downloading at that moment (confirmed against Steam's own
+/// progress bars for those two), with every other pending-but-queued game
+/// at a plain 6.
+fn derive_status(flags: u64, buildid: Option<&str>, target_buildid: Option<&str>) -> UpdateStatus {
+    if flags & STATE_UPDATE_RUNNING != 0 {
+        UpdateStatus::Updating
+    } else if flags & STATE_UPDATE_REQUIRED != 0 {
+        UpdateStatus::UpdateAvailable
+    } else if let (Some(b), Some(t)) = (buildid, target_buildid) {
+        if t != "0" && t != b {
+            UpdateStatus::UpdateAvailable
+        } else if flags & STATE_FULLY_INSTALLED != 0 {
+            UpdateStatus::UpToDate
+        } else {
+            UpdateStatus::Unknown
+        }
+    } else if flags & STATE_FULLY_INSTALLED != 0 {
+        UpdateStatus::UpToDate
+    } else {
+        UpdateStatus::Unknown
+    }
+}
+
 pub struct SteamProvider;
 
 impl SteamProvider {
@@ -53,33 +88,7 @@ impl SteamProvider {
         let buildid = state.get("buildid").and_then(|v| v.as_str());
         let target_buildid = state.get("TargetBuildID").and_then(|v| v.as_str());
 
-        // Bit 1024 means Steam is actively streaming bytes for this game
-        // right now — checked before UpdateRequired (2), which every
-        // observed mid-download game also carried (both bits set together:
-        // 1030 = 1024|4|2). Real bug fixed here, reported by a user: an
-        // earlier version of this check tested bit 256 instead, a guess
-        // that turned out wrong — a live StateFlags dump from that user's
-        // own machine (see file-top comment) never showed 256 anywhere, and
-        // showed 1024 set on exactly the two games actively downloading at
-        // that moment (confirmed against Steam's own progress bars for
-        // those two), with every other pending-but-queued game at a plain 6.
-        let status = if flags & STATE_UPDATE_RUNNING != 0 {
-            UpdateStatus::Updating
-        } else if flags & STATE_UPDATE_REQUIRED != 0 {
-            UpdateStatus::UpdateAvailable
-        } else if let (Some(b), Some(t)) = (buildid, target_buildid) {
-            if t != "0" && t != b {
-                UpdateStatus::UpdateAvailable
-            } else if flags & STATE_FULLY_INSTALLED != 0 {
-                UpdateStatus::UpToDate
-            } else {
-                UpdateStatus::Unknown
-            }
-        } else if flags & STATE_FULLY_INSTALLED != 0 {
-            UpdateStatus::UpToDate
-        } else {
-            UpdateStatus::Unknown
-        };
+        let status = derive_status(flags, buildid, target_buildid);
 
         Some(Game {
             launcher: "steam",
@@ -201,5 +210,46 @@ impl LauncherProvider for SteamProvider {
 
     fn supports_launch(&self) -> bool {
         true
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn actively_downloading_flags_report_updating() {
+        // Real observed case from the bug history: 1024|4|2, both games
+        // actively mid-download the moment this was captured live.
+        assert_eq!(derive_status(1030, None, None), UpdateStatus::Updating);
+    }
+
+    #[test]
+    fn queued_only_flags_report_update_available() {
+        // 2|4: UpdateRequired set but not yet actively downloading.
+        assert_eq!(derive_status(6, None, None), UpdateStatus::UpdateAvailable);
+    }
+
+    #[test]
+    fn buildid_mismatch_reports_update_available_independent_of_flags() {
+        // UpdateRequired bit (2) not set at all here — only the buildid
+        // path should catch this.
+        assert_eq!(derive_status(4, Some("5"), Some("7")), UpdateStatus::UpdateAvailable);
+    }
+
+    #[test]
+    fn target_buildid_zero_means_no_pending_build_reports_up_to_date() {
+        // TargetBuildID "0" is Steam's own way of saying "nothing queued".
+        assert_eq!(derive_status(4, Some("5"), Some("0")), UpdateStatus::UpToDate);
+    }
+
+    #[test]
+    fn no_flags_and_no_buildid_info_is_unknown() {
+        assert_eq!(derive_status(0, None, None), UpdateStatus::Unknown);
+    }
+
+    #[test]
+    fn matching_buildids_with_fully_installed_flag_report_up_to_date() {
+        assert_eq!(derive_status(4, Some("5"), Some("5")), UpdateStatus::UpToDate);
     }
 }

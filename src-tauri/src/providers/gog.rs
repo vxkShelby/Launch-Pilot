@@ -28,6 +28,17 @@
 use super::{Game, LauncherProvider, UpdateStatus};
 use serde::Deserialize;
 
+/// Standalone so build-id comparison across all four `Option` combinations
+/// can be unit-tested directly, without a real registry entry or network
+/// round-trip.
+fn derive_status(installed: Option<&str>, latest: Option<&str>) -> UpdateStatus {
+    match (installed, latest) {
+        (Some(i), Some(l)) if i != l => UpdateStatus::UpdateAvailable,
+        (Some(_), Some(_)) => UpdateStatus::UpToDate,
+        _ => UpdateStatus::Unknown,
+    }
+}
+
 pub struct GogProvider;
 
 const GAMES_KEY: &str = "SOFTWARE\\WOW6432Node\\GOG.com\\Games";
@@ -133,11 +144,7 @@ impl LauncherProvider for GogProvider {
                 .into_iter()
                 .filter_map(|h| h.join().ok())
                 .map(|(entry, latest)| {
-                    let status = match (&entry.build_id, latest) {
-                        (Some(installed), Some(latest)) if *installed != latest => UpdateStatus::UpdateAvailable,
-                        (Some(_), Some(_)) => UpdateStatus::UpToDate,
-                        _ => UpdateStatus::Unknown,
-                    };
+                    let status = derive_status(entry.build_id.as_deref(), latest.as_deref());
                     Game {
                         launcher: "gog",
                         id: entry.id,
@@ -212,5 +219,35 @@ impl LauncherProvider for GogProvider {
 
     fn supports_launch(&self) -> bool {
         true
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn different_build_ids_report_update_available() {
+        assert_eq!(derive_status(Some("100"), Some("101")), UpdateStatus::UpdateAvailable);
+    }
+
+    #[test]
+    fn equal_build_ids_report_up_to_date() {
+        assert_eq!(derive_status(Some("100"), Some("100")), UpdateStatus::UpToDate);
+    }
+
+    #[test]
+    fn missing_installed_build_is_unknown() {
+        assert_eq!(derive_status(None, Some("101")), UpdateStatus::Unknown);
+    }
+
+    #[test]
+    fn missing_latest_build_is_unknown() {
+        assert_eq!(derive_status(Some("100"), None), UpdateStatus::Unknown);
+    }
+
+    #[test]
+    fn both_missing_is_unknown() {
+        assert_eq!(derive_status(None, None), UpdateStatus::Unknown);
     }
 }
