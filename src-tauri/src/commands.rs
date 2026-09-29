@@ -95,7 +95,7 @@ pub struct ProviderResult {
 fn extract_icon_data_uri(path: &std::path::Path) -> Option<String> {
     use std::os::windows::ffi::OsStrExt;
     use windows_sys::Win32::Graphics::Gdi::{
-        DeleteDC, DeleteObject, GetDC, GetDIBits, GetObjectW, ReleaseDC, BITMAP, BITMAPINFO, BITMAPINFOHEADER,
+        DeleteObject, GetDC, GetDIBits, GetObjectW, ReleaseDC, BITMAP, BITMAPINFO, BITMAPINFOHEADER,
         BI_RGB, DIB_RGB_COLORS,
     };
     use windows_sys::Win32::UI::Shell::{SHGetFileInfoW, SHFILEINFOW, SHGFI_ICON, SHGFI_SMALLICON};
@@ -159,7 +159,6 @@ fn extract_icon_data_uri(path: &std::path::Path) -> Option<String> {
         DeleteObject(icon_info.hbmColor as _);
         DeleteObject(icon_info.hbmMask as _);
         DestroyIcon(info.hIcon);
-        let _ = DeleteDC; // Gdi import kept for symmetry with other DC calls
 
         if scanlines == 0 {
             return None;
@@ -248,8 +247,23 @@ pub fn provider_data(launcher: String) -> Option<ProviderResult> {
 /// or URI (steam://, com.epicgames.launcher://, goggalaxy://, RiotClient
 /// process args) — defense in depth against a compromised/XSS'd frontend
 /// calling trigger_update directly with an attacker-chosen game_id.
+///
+/// Security-review finding, fixed: allowing '.' meant "." and ".." both
+/// passed the character-class check (every character in each is '.'), so
+/// this wasn't actually a path-traversal guard despite the doc comment
+/// above claiming it blocks one — no current caller joins game_id as a bare
+/// path segment, so nothing was exploitable yet, but the next one to do
+/// `dir.join(game_id)` would have silently reintroduced traversal. Reject
+/// those two exact values explicitly rather than relying on how callers
+/// happen to use the string today.
 fn is_safe_id(id: &str) -> bool {
-    id.is_empty() || id.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.'))
+    if id.is_empty() {
+        return true;
+    }
+    if id == "." || id == ".." {
+        return false;
+    }
+    id.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.'))
 }
 
 #[tauri::command]

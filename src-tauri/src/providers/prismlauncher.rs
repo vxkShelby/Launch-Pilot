@@ -184,6 +184,21 @@ impl PrismLauncherProvider {
 
     /// Modrinth's documented pack-file download URL shape:
     /// cdn.modrinth.com/data/<project_id>/versions/<version_id>/<filename>
+    ///
+    /// Security-review finding, fixed: this file's own `downloads` URL comes
+    /// from a `modrinth.index.json` the user imported — third-party content,
+    /// not something LaunchPilot produced — and the extracted ids used to be
+    /// spliced verbatim into a new request URL with no format check. A
+    /// crafted index file could put `/`, `..`, or `?`/`#` into what's
+    /// supposed to be a plain project/version id, redirecting the outgoing
+    /// request's path/query within api.modrinth.com (the host itself is
+    /// hardcoded, so this was never cross-host SSRF). Real Modrinth ids are
+    /// short alphanumeric/`-`/`_` slugs or base62 ids, so reject anything
+    /// else here rather than trusting the split result.
+    fn is_valid_modrinth_id(s: &str) -> bool {
+        !s.is_empty() && s.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-'))
+    }
+
     fn parse_modrinth_url(url: &str) -> Option<(String, String)> {
         let after = url.split("cdn.modrinth.com/data/").nth(1)?;
         let mut parts = after.split('/');
@@ -192,6 +207,9 @@ impl PrismLauncherProvider {
             return None;
         }
         let version_id = parts.next()?.to_string();
+        if !Self::is_valid_modrinth_id(&project_id) || !Self::is_valid_modrinth_id(&version_id) {
+            return None;
+        }
         Some((project_id, version_id))
     }
 

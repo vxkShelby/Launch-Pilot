@@ -186,10 +186,21 @@ impl LauncherProvider for GogProvider {
     // (verified live: "X:\GOG Galaxy\Games\Celtic Kings\Celtic Kings.exe")
     // — no heuristic needed, unlike providers that only know an install
     // folder.
+    // Same staleness class `list_games` already guards against for the
+    // install `path` value: a registry `exe` value can outlive the actual
+    // file (interrupted uninstall, manually deleted install). A stale icon
+    // path is harmless on its own (extract_icon_data_uri already checks
+    // existence), but this path is also what `launch()` spawns — checking
+    // here means a stale entry fails the same honest way in both places
+    // instead of relying on Command::spawn's own error.
     fn game_icon_source(&self, game_id: &str) -> Option<std::path::PathBuf> {
         let hklm = winreg::RegKey::predef(winreg::enums::HKEY_LOCAL_MACHINE);
         let exe: String = hklm.open_subkey(GAMES_KEY).ok()?.open_subkey(game_id).ok()?.get_value("exe").ok()?;
-        Some(std::path::PathBuf::from(exe))
+        let path = std::path::PathBuf::from(exe);
+        if !path.exists() {
+            return None;
+        }
+        Some(path)
     }
 
     // Same real exe path already resolved for the game's icon — no separate
