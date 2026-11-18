@@ -11,7 +11,7 @@ pub mod wargaming;
 
 use serde::Serialize;
 
-#[derive(Serialize, Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Serialize, Clone, Copy, PartialEq, Eq, Debug, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum UpdateStatus {
     UpToDate,
@@ -20,10 +20,28 @@ pub enum UpdateStatus {
     /// the launcher's own live log/state, not inferred) — distinct from
     /// UpdateAvailable, which means "pending, not yet started."
     Updating,
+    #[default]
     Unknown,
 }
 
-#[derive(Serialize, Clone)]
+/// One installed game/instance as sent to the frontend. Every optional field
+/// serialises as `null` when the launcher has no real, verified source for it
+/// (never a guessed/zero value). Which launcher fills which optional field:
+///
+/// | field                | populated by                                              |
+/// |----------------------|-----------------------------------------------------------|
+/// | `installed_build`    | Steam (buildid), Epic, GOG, EA, Battle.net, Wargaming, Prism, AotR |
+/// | `size_bytes`         | Steam (SizeOnDisk), Epic (InstallSize), EA (EstimatedSize, approx.) |
+/// | `last_updated`       | Steam only (LastUpdated, unix seconds)                    |
+/// | `last_played`        | Steam (LastPlayed), PrismLauncher instances (lastLaunchTime) |
+/// | `install_date`       | GOG only (INSTALLDATE, local time string)                 |
+/// | `update_bytes_total`, `update_bytes_done`, `update_scheduled` | Steam only, and only while `status` is `update_available` / `updating` |
+///
+/// Deliberately NOT populated (no verified source): Epic last-played;
+/// Battle.net / Ubisoft / Wargaming sizes (their Uninstall `EstimatedSize` is
+/// empty on the reference machine); GOG size (the registry value there is an
+/// installer stub, not the game size).
+#[derive(Serialize, Clone, Default)]
 pub struct Game {
     pub launcher: &'static str,
     pub id: String,
@@ -31,7 +49,21 @@ pub struct Game {
     pub installed_build: Option<String>,
     pub status: UpdateStatus,
     pub size_bytes: Option<u64>,
+    /// Unix seconds the launcher last patched this game. Steam only.
     pub last_updated: Option<u64>,
+    /// Unix seconds the game was last started (per install). Steam, Prism.
+    pub last_played: Option<u64>,
+    /// GOG's `INSTALLDATE`, `YYYY-MM-DD HH:MM:SS` in the machine's local time.
+    /// The string carries no timezone, so it is not converted to an epoch.
+    pub install_date: Option<String>,
+    /// Steam pending update: bytes Steam says it must download
+    /// (`BytesToDownload`). Only set while the status is pending/updating.
+    pub update_bytes_total: Option<u64>,
+    /// Steam pending update: bytes already downloaded (`BytesDownloaded`).
+    pub update_bytes_done: Option<u64>,
+    /// Steam pending update: unix seconds Steam plans to start the update
+    /// (`ScheduledAutoUpdate`); `null` when nothing is scheduled (0).
+    pub update_scheduled: Option<u64>,
 }
 
 pub trait LauncherProvider: Send + Sync {
@@ -92,6 +124,142 @@ pub trait LauncherProvider: Send + Sync {
     fn supports_launch(&self) -> bool {
         false
     }
+    /// Whether `trigger_update` honestly starts or opens an update flow for
+    /// this launcher. False only where no verified update-only mechanism
+    /// exists and the one known deep link would do something else (Epic: its
+    /// only known per-game URI action starts the game).
+    fn supports_update(&self) -> bool {
+        true
+    }
+}
+
+/// Ids spliced into a protocol URI (steam://, goggalaxy://,
+/// com.epicgames.launcher://): ASCII alphanumerics, `_`, `-`, `.`, non-empty,
+/// and not a bare run of dots. Stricter than the command-layer `is_safe_id`
+/// on purpose — these ids are numeric/hex/slug in practice.
+pub fn uri_safe_id(id: &str) -> Result<&str, String> {
+    let ok = !id.is_empty()
+        && id.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.'))
+        && id.chars().any(|c| c != '.');
+    if ok {
+        Ok(id)
+    } else {
+        Err("invalid game id".to_string())
+    }
+}
+
+/// Spawns a game/launcher executable with its own folder (or an explicit
+/// `cwd`) as working directory — many games load assets relative to it and
+/// fail or exit when started from LaunchPilot's directory. Refuses anything
+/// that isn't an `.exe` (EA's `DisplayIcon` can point at an icon file).
+pub fn spawn_exe(path: &std::path::Path, cwd: Option<&std::path::Path>) -> Result<(), String> {
+    if path.extension().and_then(|e| e.to_str()).map(|e| e.eq_ignore_ascii_case("exe")) != Some(true) {
+        return Err(format!("not an executable: {}", path.display()));
+    }
+    let mut command = std::process::Command::new(path);
+    if let Some(dir) = cwd.or_else(|| path.parent()).filter(|d| d.is_dir()) {
+        command.current_dir(dir);
+    }
+    command.spawn().map(|_| ()).map_err(|e| e.to_string())
+}
+
+/// Windows PowerShell 5.1 by absolute path (`%SystemRoot%\System32\
+/// WindowsPowerShell\v1.0\powershell.exe`) instead of a bare `powershell`,
+/// which Windows resolves application-directory-first.
+pub fn powershell_exe() -> std::path::PathBuf {
+    let system_root = std::env::var("SystemRoot").unwrap_or_else(|_| "C:\\Windows".to_string());
+    std::path::PathBuf::from(system_root).join("System32\\WindowsPowerShell\\v1.0\\powershell.exe")
+}
+
+/// Drive letters that are safe to probe with `Path::exists()`. Skips network
+/// drives (a mapped SMB share whose server is down blocks `exists()` until the
+/// redirector times out), CD/DVD, and letters with no drive.
+pub fn scannable_drive_letters() -> Vec<char> {
+    ('C'..='Z').filter(|d| drive_is_scannable(*d)).collect()
+}
+
+#[cfg(windows)]
+fn drive_is_scannable(letter: char) -> bool {
+    use windows_sys::Win32::Storage::FileSystem::GetDriveTypeW;
+    let root: Vec<u16> = format!("{letter}:\\").encode_utf16().chain(std::iter::once(0)).collect();
+    // SAFETY: `root` is a NUL-terminated UTF-16 string that outlives the call.
+    let kind = unsafe { GetDriveTypeW(root.as_ptr()) };
+    drive_type_is_scannable(kind)
+}
+
+#[cfg(not(windows))]
+fn drive_is_scannable(_letter: char) -> bool {
+    false
+}
+
+/// GetDriveType return codes (winbase.h): 0 UNKNOWN, 1 NO_ROOT_DIR,
+/// 2 REMOVABLE, 3 FIXED, 4 REMOTE, 5 CDROM, 6 RAMDISK.
+fn drive_type_is_scannable(kind: u32) -> bool {
+    matches!(kind, 2 | 3 | 6)
+}
+
+/// Lower-cased image names of every running process, from the Win32
+/// ToolHelp snapshot API. This replaced spawning `tasklist`, which took
+/// 45-160 s per call on the reference machine (measured: `tasklist /FO CSV
+/// /NH` 162 s vs. `Get-Process` 0.05 s) and, being shared behind one lock,
+/// held every launcher's running-check — and so its whole result — for that
+/// long. No child process, no console window.
+#[cfg(windows)]
+fn snapshot_process_names() -> std::collections::HashSet<String> {
+    use windows_sys::Win32::Foundation::{CloseHandle, INVALID_HANDLE_VALUE};
+    use windows_sys::Win32::System::Diagnostics::ToolHelp::{
+        CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W, TH32CS_SNAPPROCESS,
+    };
+
+    let mut names = std::collections::HashSet::new();
+    // SAFETY: standard ToolHelp enumeration. `entry` is zero-initialised
+    // with `dwSize` set as the API requires, and the snapshot handle is
+    // closed before returning.
+    unsafe {
+        let snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+        if snapshot == INVALID_HANDLE_VALUE {
+            return names;
+        }
+        let mut entry: PROCESSENTRY32W = std::mem::zeroed();
+        entry.dwSize = std::mem::size_of::<PROCESSENTRY32W>() as u32;
+        let mut more = Process32FirstW(snapshot, &mut entry);
+        while more != 0 {
+            let len = entry.szExeFile.iter().position(|c| *c == 0).unwrap_or(entry.szExeFile.len());
+            names.insert(String::from_utf16_lossy(&entry.szExeFile[..len]).to_ascii_lowercase());
+            more = Process32NextW(snapshot, &mut entry);
+        }
+        CloseHandle(snapshot);
+    }
+    names
+}
+
+#[cfg(not(windows))]
+fn snapshot_process_names() -> std::collections::HashSet<String> {
+    std::collections::HashSet::new()
+}
+
+/// Running process names for the per-launcher running indicator, cached for
+/// two seconds so the concurrent `provider_data` calls of one refresh share
+/// one snapshot. Plain process presence, not a window check: Ubisoft
+/// Connect's tray-resident helper is handled separately (ubisoft.rs
+/// `is_running`), and a window-visibility check was tried and reverted
+/// because Steam minimized to tray looks identical to a closed client.
+pub fn running_process_names() -> std::collections::HashSet<String> {
+    use std::sync::{Mutex, OnceLock};
+    use std::time::{Duration, Instant};
+
+    static CACHE: OnceLock<Mutex<Option<(Instant, std::collections::HashSet<String>)>>> = OnceLock::new();
+    let cache = CACHE.get_or_init(|| Mutex::new(None));
+    let mut guard = cache.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some((fetched_at, names)) = guard.as_ref() {
+        if fetched_at.elapsed() < Duration::from_secs(2) {
+            return names.clone();
+        }
+    }
+
+    let names = snapshot_process_names();
+    *guard = Some((Instant::now(), names.clone()));
+    names
 }
 
 /// Disclosed heuristic shared by providers that know a game's install
@@ -142,7 +310,7 @@ pub fn is_recently_modified(path: &std::path::Path, window: std::time::Duration)
 
 #[cfg(test)]
 mod tests {
-    use super::find_main_exe;
+    use super::{drive_type_is_scannable, find_main_exe, spawn_exe, uri_safe_id};
     use std::fs;
     use std::path::PathBuf;
 
@@ -197,6 +365,39 @@ mod tests {
 
         fs::remove_dir_all(&dir).unwrap();
         assert_eq!(result, Some(dir.join("biggest.exe")));
+    }
+
+    #[test]
+    fn network_cdrom_and_missing_drives_are_not_scanned() {
+        assert!(drive_type_is_scannable(3)); // FIXED
+        assert!(drive_type_is_scannable(2)); // REMOVABLE
+        assert!(!drive_type_is_scannable(4)); // REMOTE (mapped network drive)
+        assert!(!drive_type_is_scannable(5)); // CDROM
+        assert!(!drive_type_is_scannable(1)); // NO_ROOT_DIR
+        assert!(!drive_type_is_scannable(0)); // UNKNOWN
+    }
+
+    #[test]
+    fn uri_safe_id_accepts_real_id_shapes_and_rejects_the_rest() {
+        for ok in ["730", "0449f415f5404df093b8d67c31940024", "FabPlugin_5.8", "steam-123"] {
+            assert_eq!(uri_safe_id(ok), Ok(ok));
+        }
+        for bad in ["", ".", "..", "a b", "a/b", "a?x=1", "a#b", "a%20b", "a&b", "a\\b", "a\0b"] {
+            assert!(uri_safe_id(bad).is_err(), "expected {bad:?} to be rejected");
+        }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn process_snapshot_contains_this_test_process() {
+        let me = std::env::current_exe().unwrap().file_name().unwrap().to_string_lossy().to_ascii_lowercase();
+        assert!(super::snapshot_process_names().contains(&me), "{me} not in snapshot");
+    }
+
+    #[test]
+    fn spawn_exe_refuses_non_exe_targets() {
+        let err = spawn_exe(std::path::Path::new("C:\\x\\game.ico"), None).unwrap_err();
+        assert!(err.contains("not an executable"), "{err}");
     }
 
     #[test]

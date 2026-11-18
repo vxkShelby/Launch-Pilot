@@ -51,27 +51,44 @@
   amber signal reserved for "needs your attention." Everything that isn't
   actionable stays quiet — plain text, no pill — so amber actually means
   something instead of decorating every status equally.
+
+  Contrast (WCAG 2.x, computed from these hex values):
+  dark  — ink 15.0:1, ink-dim 5.57:1 on bg-0 / 4.81:1 on bg-2, amber 8.6:1,
+          blue 7.5:1, line-strong 3.50 / 3.24 / 3.03 on bg-0 / bg-1 / bg-2.
+  light — ink 15.2:1, ink-dim 6.0:1, amber 5.7:1 (5.06 on its pill),
+          blue 6.05:1 (5.41 on its pill), line-strong 3.06 / 3.25 / 3.43.
+  --line / --line-soft are decorative separators and intentionally quiet.
 */
 :root {
   --font-ui: "IBM Plex Sans", "Segoe UI", Avenir, Helvetica, Arial, sans-serif;
   --font-mono: "IBM Plex Mono", ui-monospace, "Cascadia Mono", Consolas, monospace;
 
+  /* Two text sizes: caption 12px, body 14px. */
+  --fs-cap: 12px;
+  --fs-body: 14px;
+  --radius-control: 4px;
+  --radius-overlay: 8px;
+  --status-w: 9rem;
+
+  color-scheme: dark;
   --bg-0: #121316;
   --bg-1: #1a1b1f;
   --bg-2: #202126;
   --line: #2a2b30;
   --line-soft: #212227;
+  --line-strong: #6a6b72;
   --ink: #e9e7e0;
   --ink-dim: #8d8d87;
-  --ink-faint: #5b5b57;
 
   --amber: #e8a33d;
   --amber-dim: #3a2c14;
+  --accent-fill: #e8a33d;
+  --accent-fill-hover: #f0af4d;
+  --on-accent: #121316;
   --blue: #7fa8d9;
   --blue-dim: #1c2733;
   --led-on: #6fbf6a;
   --led-on-glow: rgba(111, 191, 106, 0.55);
-  --led-off: #4a3535;
 
   font-family: var(--font-ui);
   font-size: 14px;
@@ -83,15 +100,83 @@
   -webkit-font-smoothing: antialiased;
 }
 
+/* Light theme: automatic via the OS, or forced from Settings. */
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) {
+    color-scheme: light;
+    --bg-0: #f3f2ee;
+    --bg-1: #faf9f6;
+    --bg-2: #ffffff;
+    --line: #dcdbd5;
+    --line-soft: #e8e7e2;
+    --line-strong: #8b8b85;
+    --ink: #1b1c20;
+    --ink-dim: #5c5c57;
+    --amber: #8a5200;
+    --amber-dim: #f6e3bd;
+    --accent-fill: #e8a33d;
+    --accent-fill-hover: #f0af4d;
+    --on-accent: #1b1c20;
+    --blue: #2c5d94;
+    --blue-dim: #dbe7f5;
+    --led-on: #2e8b3a;
+    --led-on-glow: transparent;
+  }
+}
+:root[data-theme="light"] {
+  color-scheme: light;
+  --bg-0: #f3f2ee;
+  --bg-1: #faf9f6;
+  --bg-2: #ffffff;
+  --line: #dcdbd5;
+  --line-soft: #e8e7e2;
+  --line-strong: #8b8b85;
+  --ink: #1b1c20;
+  --ink-dim: #5c5c57;
+  --amber: #8a5200;
+  --amber-dim: #f6e3bd;
+  --accent-fill: #e8a33d;
+  --accent-fill-hover: #f0af4d;
+  --on-accent: #1b1c20;
+  --blue: #2c5d94;
+  --blue-dim: #dbe7f5;
+  --led-on: #2e8b3a;
+  --led-on-glow: transparent;
+}
+
+[hidden] {
+  display: none !important;
+}
+
+html,
+body {
+  height: 100%;
+}
+
 body {
   margin: 0;
   display: flex;
   flex-direction: column;
-  min-height: 100vh;
+  height: 100vh;
+  overflow: hidden;
+  background: var(--bg-0);
+  font-size: var(--fs-body);
 }
 
 .muted {
   color: var(--ink-dim);
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
 }
 
 ::-webkit-scrollbar {
@@ -102,7 +187,7 @@ body {
   background: var(--bg-0);
 }
 ::-webkit-scrollbar-thumb {
-  background: var(--line);
+  background: var(--line-strong);
   border-radius: 5px;
 }
 ::-webkit-scrollbar-thumb:hover {
@@ -126,27 +211,28 @@ select:focus-visible {
   }
 }
 
+/* ------------------------------------------------------------ topbar */
 .topbar {
+  flex-shrink: 0;
   display: flex;
   align-items: center;
   gap: 1.25rem;
   padding: 0.7rem 1.25rem;
   border-bottom: 1px solid var(--line);
   background: var(--bg-1);
-  position: sticky;
-  top: 0;
-  z-index: 1;
 }
 
 .brand {
   display: flex;
   align-items: baseline;
   gap: 0.5rem;
+  flex-shrink: 0;
+  white-space: nowrap;
 }
 
 .brand h1 {
   margin: 0;
-  font-size: 1.05rem;
+  font-size: var(--fs-body);
   font-weight: 600;
   letter-spacing: -0.01em;
   color: var(--ink);
@@ -154,12 +240,17 @@ select:focus-visible {
 
 .version {
   font-family: var(--font-mono);
-  font-size: 0.7rem;
+  font-size: var(--fs-cap);
 }
 
 .stats {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-family: var(--font-mono);
-  font-size: 0.8rem;
+  font-size: var(--fs-cap);
   font-variant-numeric: tabular-nums;
   transition: color 0.15s ease;
 }
@@ -173,42 +264,47 @@ select:focus-visible {
   display: flex;
   align-items: center;
   gap: 0.5rem;
+  flex-shrink: 1;
+  min-width: 0;
+}
+
+.controls > button {
+  flex-shrink: 0;
+  white-space: nowrap;
 }
 
 #search {
+  flex: 0 1 12rem;
+  width: 12rem;
+  min-width: 7rem;
   background: var(--bg-2);
-  border: 1px solid var(--line);
-  border-radius: 3px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-control);
   color: var(--ink);
   font-family: var(--font-ui);
-  padding: 0.4rem 0.65rem;
-  font-size: 0.85rem;
-  width: 12rem;
+  padding: 0.35rem 0.65rem;
+  font-size: var(--fs-body);
 }
 
 #search::placeholder {
   color: var(--ink-dim);
 }
 
-#search:focus-visible {
-  outline: none;
-  border-color: var(--amber);
-}
-
 button {
   background: var(--bg-2);
   border: 1px solid var(--line);
-  border-radius: 3px;
+  border-radius: var(--radius-control);
   color: var(--ink);
   font-family: var(--font-ui);
   font-weight: 500;
   padding: 0.4rem 0.75rem;
-  font-size: 0.82rem;
+  font-size: var(--fs-cap);
+  line-height: 1.4;
   cursor: pointer;
   transition: border-color 0.15s ease, background 0.15s ease;
 }
 
-button:hover {
+button:hover:not(:disabled) {
   border-color: var(--ink-dim);
 }
 
@@ -217,22 +313,25 @@ button:disabled {
   cursor: default;
 }
 
-#update-all-btn {
-  background: var(--amber);
-  border-color: var(--amber);
-  color: var(--bg-0);
+#update-all-btn,
+.btn-primary {
+  background: var(--accent-fill);
+  border-color: var(--accent-fill);
+  color: var(--on-accent);
   font-weight: 600;
 }
 
-#update-all-btn:hover {
-  background: #f0af4d;
-  border-color: #f0af4d;
+#update-all-btn:hover:not(:disabled),
+.btn-primary:hover:not(:disabled) {
+  background: var(--accent-fill-hover);
+  border-color: var(--accent-fill-hover);
 }
 
 .icon-btn {
-  padding: 0.4rem 0.55rem;
-  font-size: 1rem;
-  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.4rem 0.5rem;
   color: var(--ink-dim);
 }
 
@@ -240,51 +339,141 @@ button:disabled {
   color: var(--ink);
 }
 
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+#refresh-btn[aria-busy="true"] > svg {
+  animation: spin 0.9s linear infinite;
+}
+
+/* ----------------------------------------------------------- toolbar */
+.toolbar {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem 1rem;
+  padding: 0.5rem 1.25rem;
+  border-bottom: 1px solid var(--line);
+  font-size: var(--fs-cap);
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.chip {
+  background: transparent;
+  border-color: var(--line-strong);
+  color: var(--ink-dim);
+}
+
+.chip[aria-pressed="true"] {
+  background: var(--ink);
+  border-color: var(--ink);
+  color: var(--bg-0);
+}
+
+.sort-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: var(--ink-dim);
+  margin-left: auto;
+}
+
+select {
+  background: var(--bg-2);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-control);
+  color: var(--ink);
+  font-family: var(--font-ui);
+  font-size: var(--fs-cap);
+  padding: 0.3rem 0.5rem;
+}
+
+/* --------------------------------------------------------- container */
 .container {
-  padding: 1.25rem 1.5rem;
   flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+  padding: 1rem 1.5rem;
 }
 
-#update-status:empty {
-  display: none;
+.banner {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin: 0 0 0.75rem;
+  padding: 0.5rem 0.75rem;
+  border-radius: var(--radius-control);
+  background: var(--amber-dim);
+  color: var(--amber);
+  font-size: var(--fs-cap);
 }
 
-#game-list {
-  margin-top: 0.5rem;
+.banner > span {
+  flex: 1;
+  min-width: 0;
+}
+
+.banner-quiet {
+  background: var(--bg-1);
+  color: var(--ink);
+  border: 1px solid var(--line);
+}
+
+.banner button {
+  flex-shrink: 0;
+}
+
+.empty-state {
+  padding: 0.6rem 0.5rem;
+  margin: 0;
 }
 
 .launcher-loading {
   padding: 0.6rem 0.5rem;
   border-top: 1px solid var(--line);
-  font-size: 0.85rem;
 }
 
 .launcher-error {
-  padding: 0.6rem 0.5rem;
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.5rem 0.25rem;
   border-top: 1px solid var(--line);
-  font-size: 0.85rem;
-  color: var(--blue);
+  color: var(--ink);
 }
 
-.no-results {
-  padding: 0.6rem 0.5rem;
-  font-size: 0.85rem;
+.error-text {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
+.state-glyph {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 1.1rem;
+  height: 1.1rem;
+  border: 1.5px solid var(--ink);
+  border-radius: 50%;
+  font-weight: 600;
+  font-size: var(--fs-cap);
+  line-height: 1;
+}
+
+/* ------------------------------------------------------------- lanes */
 .launcher-section {
   border-top: 1px solid var(--line);
-  animation: lane-in 0.25s ease both;
-}
-
-@keyframes lane-in {
-  from {
-    opacity: 0;
-    transform: translateY(2px);
-  }
-  to {
-    opacity: 1;
-    transform: none;
-  }
 }
 
 .launcher-section > summary {
@@ -294,7 +483,7 @@ button:disabled {
   padding: 0.65rem 0.25rem;
   cursor: pointer;
   font-weight: 600;
-  font-size: 0.92rem;
+  font-size: var(--fs-body);
   list-style: none;
 }
 
@@ -302,14 +491,19 @@ button:disabled {
   display: none;
 }
 
-.launcher-section > summary::before {
-  content: "▸";
-  color: var(--ink-dim);
-  font-size: 0.75rem;
+.chevron {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  margin: 0 0.3rem 0 0.15rem;
+  border-right: 1.5px solid var(--ink-dim);
+  border-bottom: 1.5px solid var(--ink-dim);
+  transform: rotate(-45deg);
+  transition: transform 0.12s ease;
 }
 
-.launcher-section[open] > summary::before {
-  content: "▾";
+details[open] > summary > .chevron {
+  transform: rotate(45deg);
 }
 
 .lane-title {
@@ -324,17 +518,16 @@ button:disabled {
   flex-shrink: 0;
   background: var(--amber-dim);
   color: var(--amber);
-  font-family: var(--font-ui);
-  font-size: 0.72rem;
+  font-size: var(--fs-cap);
   font-weight: 600;
-  padding: 0.15rem 0.5rem;
-  border-radius: 3px;
+  padding: 0.1rem 0.5rem;
+  border-radius: var(--radius-control);
 }
 
 .lane-meta {
   flex-shrink: 0;
   font-family: var(--font-mono);
-  font-size: 0.75rem;
+  font-size: var(--fs-cap);
   font-weight: 400;
   color: var(--ink-dim);
   font-variant-numeric: tabular-nums;
@@ -349,9 +542,12 @@ button:disabled {
 }
 
 .rest-section > summary {
+  display: flex;
+  align-items: center;
+  gap: 0.2rem;
   cursor: pointer;
   color: var(--ink-dim);
-  font-size: 0.82rem;
+  font-size: var(--fs-cap);
   padding: 0.3rem 0;
   list-style: none;
 }
@@ -360,26 +556,19 @@ button:disabled {
   display: none;
 }
 
-.rest-section > summary::before {
-  content: "▸ ";
-}
-
-.rest-section[open] > summary::before {
-  content: "▾ ";
-}
-
+/* -------------------------------------------------------------- rows */
 .game-row {
-  display: flex;
+  display: grid;
+  grid-template-columns: var(--status-w) minmax(0, 1fr) auto;
   align-items: center;
-  gap: 1rem;
-  padding: 0.5rem 0;
+  column-gap: 1rem;
+  padding: 0.4rem 0;
   border-bottom: 1px solid var(--line-soft);
 }
 
 .game-name {
-  flex: 1;
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: 0.5rem;
   min-width: 0;
   overflow: hidden;
@@ -389,30 +578,74 @@ button:disabled {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 0.88rem;
+  font-size: var(--fs-body);
 }
 
-.game-icon {
-  width: 15px;
-  height: 15px;
+.game-icon,
+.launcher-icon {
+  width: 16px;
+  height: 16px;
   border-radius: 2px;
   object-fit: contain;
   flex-shrink: 0;
+}
+
+/* An <img> with no src draws nothing (alt is empty); the box stays so rows align. */
+.game-icon:not([src]),
+.launcher-icon:not([src]) {
+  visibility: hidden;
 }
 
 .game-size {
   font-family: var(--font-mono);
   color: var(--ink-dim);
   font-variant-numeric: tabular-nums;
-  font-size: 0.74rem;
+  font-size: var(--fs-cap);
   flex-shrink: 0;
+  white-space: nowrap;
 }
 
-.update-size {
-  font-family: var(--font-mono);
+.row-actions {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.4rem;
+}
+
+.row-sub {
+  grid-column: 2 / -1;
+  padding-left: calc(16px + 0.5rem);
+  margin-top: 0;
+  line-height: 1.35;
   color: var(--ink-dim);
-  font-variant-numeric: tabular-nums;
-  font-size: 0.74rem;
+  font-size: var(--fs-cap);
+  overflow-wrap: anywhere;
+}
+
+.sub-progress {
+  white-space: nowrap;
+}
+
+progress {
+  width: 6rem;
+  height: 0.5rem;
+  vertical-align: middle;
+  accent-color: var(--blue);
+}
+
+.row-msg {
+  grid-column: 2 / -1;
+  margin-top: 0.2rem;
+  margin-left: calc(16px + 0.5rem);
+  font-size: var(--fs-cap);
+  color: var(--ink-dim);
+  overflow-wrap: anywhere;
+}
+
+.row-msg-error {
+  color: var(--ink);
+  padding-left: 0.5rem;
+  border-left: 2px solid var(--amber);
 }
 
 .btn-update {
@@ -422,33 +655,41 @@ button:disabled {
   font-weight: 600;
 }
 
-.btn-update:hover {
+.btn-update:hover:not(:disabled) {
   background: var(--amber);
+  border-color: var(--amber);
   color: var(--bg-0);
 }
 
-/* Quiet blue outline, not amber — amber is reserved for "needs attention"
-   (see the palette comment at the top of this file), and launching a game
-   isn't that, so it must not look like the Update button. */
-.btn-launch {
+/* Quiet by default so a long list isn't a wall of outlined boxes; the blue
+   outline returns on row hover / keyboard focus. Amber stays reserved for
+   "needs attention". */
+.btn-launch,
+.btn-quiet {
   background: transparent;
-  border: 1px solid var(--blue);
-  color: var(--blue);
-  font-weight: 600;
+  border-color: transparent;
+  color: var(--ink-dim);
 }
 
-.btn-launch:hover {
+.game-row:hover .btn-launch,
+.btn-launch:focus-visible {
+  border-color: var(--blue);
+  color: var(--blue);
+}
+
+.btn-launch:hover:not(:disabled) {
   background: var(--blue);
+  border-color: var(--blue);
   color: var(--bg-0);
 }
 
 .status {
-  flex: 0 0 7rem;
-  font-size: 0.72rem;
+  font-size: var(--fs-cap);
   font-weight: 600;
-  padding: 0.15rem 0.5rem;
-  border-radius: 3px;
+  padding: 0.1rem 0.5rem;
+  border-radius: var(--radius-control);
   text-align: left;
+  white-space: nowrap;
 }
 
 .status-up_to_date {
@@ -475,14 +716,19 @@ button:disabled {
   padding-left: 0;
 }
 
+.status-unknown::before {
+  content: "? ";
+}
+
 .connected-only {
   margin-top: 1rem;
 }
 
 .connected-row {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 1rem;
+  gap: 0.25rem 1rem;
   padding: 0.4rem 0;
 }
 
@@ -493,60 +739,90 @@ button:disabled {
   gap: 0.6rem;
 }
 
-.launcher-icon {
-  width: 16px;
-  height: 16px;
-  border-radius: 2px;
-  object-fit: contain;
-  vertical-align: middle;
-  flex-shrink: 0;
+.connected-row .row-msg {
+  flex-basis: 100%;
 }
 
+.not-detected {
+  margin-top: 1rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid var(--line);
+  color: var(--ink-dim);
+  font-size: var(--fs-cap);
+}
+
+.not-detected summary {
+  cursor: pointer;
+  padding: 0.25rem 0;
+}
+
+.not-detected p {
+  margin: 0.25rem 0 0;
+}
+
+/* Filled = running, hollow = not running: shape, not just colour. */
 .running-dot {
   display: inline-block;
-  width: 0.55rem;
-  height: 0.55rem;
-  min-width: 0.55rem;
+  box-sizing: border-box;
+  width: 0.6rem;
+  height: 0.6rem;
+  min-width: 0.6rem;
   border-radius: 50%;
   flex: none;
+  border: 1.5px solid var(--ink-dim);
+  background: transparent;
 }
 
 .running-dot-on {
+  border-color: var(--led-on);
   background: var(--led-on);
-  box-shadow: inset 0 0 1px rgba(0, 0, 0, 0.4), 0 0 5px var(--led-on-glow);
+  box-shadow: 0 0 5px var(--led-on-glow);
 }
 
-.running-dot-off {
-  background: var(--led-off);
-  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.5);
+@media (forced-colors: active) {
+  .running-dot-on {
+    background: CanvasText;
+  }
 }
 
-.settings-panel {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.5);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 2;
-}
-
-.settings-panel[hidden] {
-  display: none;
-}
-
-.settings-card {
+/* ----------------------------------------------------------- dialogs */
+dialog {
+  width: 26rem;
+  max-width: calc(100vw - 2rem);
+  max-height: calc(100vh - 2rem);
+  overflow: auto;
+  padding: 0;
   background: var(--bg-1);
+  color: var(--ink);
   border: 1px solid var(--line);
-  border-radius: 4px;
-  padding: 1.25rem 1.5rem;
-  min-width: 20rem;
+  border-radius: var(--radius-overlay);
 }
 
-.settings-card h2 {
+dialog::backdrop {
+  background: rgba(0, 0, 0, 0.5);
+}
+
+.dialog-card {
+  padding: 1.25rem 1.5rem;
+}
+
+.dialog-card h2 {
   margin: 0 0 1rem;
-  font-size: 1rem;
+  font-size: var(--fs-body);
   font-weight: 600;
+}
+
+.dialog-card h3 {
+  margin: 0 0 0.4rem;
+  font-size: var(--fs-body);
+  font-weight: 600;
+}
+
+.dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  margin-top: 1rem;
 }
 
 .settings-row {
@@ -554,33 +830,74 @@ button:disabled {
   align-items: center;
   justify-content: space-between;
   gap: 1rem;
-  margin-bottom: 1.25rem;
-  font-size: 0.88rem;
+  margin-bottom: 1rem;
 }
 
-.settings-row select {
-  background: var(--bg-2);
-  border: 1px solid var(--line);
-  border-radius: 3px;
+.settings-check {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin-bottom: 0.5rem;
+}
+
+.opt-error {
+  color: var(--amber);
+}
+
+.settings-section {
+  margin-top: 1rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--line);
+}
+
+.settings-note {
+  margin: 0 0 0.5rem;
+  font-size: var(--fs-cap);
+  line-height: 1.5;
+}
+
+.ignored-list,
+.shortcut-list,
+.confirm-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  font-size: var(--fs-cap);
+}
+
+.ignored-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.25rem 0;
+}
+
+.shortcut-list li,
+.confirm-list li {
+  padding: 0.15rem 0;
+  color: var(--ink-dim);
+}
+
+kbd {
+  font-family: var(--font-mono);
+  font-size: var(--fs-cap);
+  padding: 0 0.3rem;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-control);
   color: var(--ink);
-  font-family: var(--font-ui);
-  padding: 0.3rem 0.5rem;
-}
-
-.onboarding-card {
-  max-width: 26rem;
 }
 
 .onboarding-intro {
   margin: 0 0 1rem;
-  font-size: 0.85rem;
+  font-size: var(--fs-cap);
   color: var(--ink-dim);
   line-height: 1.5;
 }
 
 .onboarding-legend {
   list-style: none;
-  margin: 0 0 1.25rem;
+  margin: 0 0 1rem;
   padding: 0;
 }
 
@@ -590,7 +907,7 @@ button:disabled {
   gap: 0.6rem;
   padding: 0.55rem 0;
   border-top: 1px solid var(--line-soft);
-  font-size: 0.85rem;
+  font-size: var(--fs-cap);
   color: var(--ink-dim);
 }
 
@@ -599,16 +916,48 @@ button:disabled {
 }
 
 .onboarding-legend .status {
-  flex: 0 0 8rem;
+  flex: 0 0 7.5rem;
 }
 
 .onboarding-legend .running-dot + .running-dot {
   margin-left: -0.35rem;
 }
 
+/* --------------------------------------------------------- status bar */
 .statusbar {
-  padding: 0.5rem 1.25rem;
+  flex-shrink: 0;
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.4rem 1.25rem;
   border-top: 1px solid var(--line);
+  background: var(--bg-1);
   font-family: var(--font-mono);
-  font-size: 0.72rem;
+  font-size: var(--fs-cap);
+}
+
+.hint {
+  white-space: nowrap;
+}
+
+/* --------------------------------------------------------- narrow window */
+@media (max-width: 900px) {
+  .topbar {
+    gap: 0.75rem;
+    padding: 0.6rem 1rem;
+  }
+  .toolbar,
+  .statusbar {
+    padding-left: 1rem;
+    padding-right: 1rem;
+  }
+  .container {
+    padding: 0.75rem 1rem;
+  }
+  .game-row {
+    column-gap: 0.6rem;
+  }
+  .hint {
+    display: none;
+  }
 }

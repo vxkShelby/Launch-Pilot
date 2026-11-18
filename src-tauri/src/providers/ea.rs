@@ -56,6 +56,11 @@ const UNINSTALL_KEYS: [&str; 2] = [
 
 pub struct EaProvider;
 
+/// `EstimatedSize` (KB) -> bytes; 0 means "not recorded", not "empty game".
+fn estimated_size_bytes(kb: u32) -> Option<u64> {
+    (kb != 0).then(|| u64::from(kb) * 1024)
+}
+
 impl EaProvider {
     /// Real local signal: a *.tmp staging file in the game's InstallData
     /// folder means a download/apply is pending. Whether it's actively
@@ -136,6 +141,11 @@ impl LauncherProvider for EaProvider {
                 }
                 let version: Option<String> = entry.get_value("DisplayVersion").ok();
                 let status = Self::update_status_from_tmp(&name);
+                // Uninstall-key `EstimatedSize` is in KB (DWORD), written by
+                // the installer — read on this machine: The Sims 4 =
+                // 27546144, Battlefield 6 = 58884928. Approximate: it can
+                // drift after patches, so the frontend should label it so.
+                let size_bytes = entry.get_value::<u32, _>("EstimatedSize").ok().and_then(estimated_size_bytes);
 
                 games.push(Game {
                     launcher: "ea",
@@ -143,8 +153,8 @@ impl LauncherProvider for EaProvider {
                     name,
                     installed_build: version,
                     status,
-                    size_bytes: None,
-                    last_updated: None,
+                    size_bytes,
+                    ..Game::default()
                 });
             }
         }
@@ -204,12 +214,26 @@ impl LauncherProvider for EaProvider {
 
     // Same real exe path already resolved for the game's icon — no separate
     // launch-target heuristic.
+    // `spawn_exe` starts it in the exe's own folder and refuses a
+    // `DisplayIcon` that isn't an .exe (it is an icon reference and could
+    // point at an .ico or installer).
     fn launch(&self, game_id: &str) -> Result<(), String> {
         let path = self.game_icon_source(game_id).ok_or("no verified exe path for this game")?;
-        std::process::Command::new(&path).spawn().map(|_| ()).map_err(|e| e.to_string())
+        super::spawn_exe(&path, None)
     }
 
     fn supports_launch(&self) -> bool {
         true
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::estimated_size_bytes;
+
+    #[test]
+    fn estimated_size_kb_converts_to_bytes_and_zero_is_unknown() {
+        assert_eq!(estimated_size_bytes(27546144), Some(27546144 * 1024)); // The Sims 4, as read locally
+        assert_eq!(estimated_size_bytes(0), None);
     }
 }

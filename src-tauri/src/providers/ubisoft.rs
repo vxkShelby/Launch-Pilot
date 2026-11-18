@@ -104,8 +104,7 @@ impl UbisoftProvider {
                     name: name.to_string(),
                     installed_build: None,
                     status: UpdateStatus::Unknown,
-                    size_bytes: None,
-                    last_updated: None,
+                    ..Game::default()
                 });
             }
         }
@@ -175,8 +174,7 @@ impl LauncherProvider for UbisoftProvider {
                 name,
                 installed_build: None,
                 status: UpdateStatus::Unknown,
-                size_bytes: None,
-                last_updated: None,
+                ..Game::default()
             });
         }
 
@@ -204,7 +202,7 @@ impl LauncherProvider for UbisoftProvider {
     }
 
     fn is_running(&self) -> Option<bool> {
-        let mut command = std::process::Command::new("powershell");
+        let mut command = std::process::Command::new(super::powershell_exe());
         command
             .arg("-NoProfile")
             .arg("-Command")
@@ -272,10 +270,11 @@ impl LauncherProvider for UbisoftProvider {
     // go through Steam at all, so that branch is untouched.
     fn launch(&self, game_id: &str) -> Result<(), String> {
         if let Some(appid) = game_id.strip_prefix("steam-") {
+            let appid = super::uri_safe_id(appid)?;
             return open::that(format!("steam://rungameid/{appid}")).map_err(|e| e.to_string());
         }
         let path = self.game_icon_source(game_id).ok_or("no verified exe path for this game")?;
-        std::process::Command::new(&path).spawn().map(|_| ()).map_err(|e| e.to_string())
+        super::spawn_exe(&path, None)
     }
 
     fn supports_launch(&self) -> bool {

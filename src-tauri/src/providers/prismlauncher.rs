@@ -128,7 +128,7 @@ impl PrismLauncherProvider {
     /// hand-rolling VS_FIXEDFILEINFO parsing over raw FFI for one string.
     fn installed_version(&self) -> Option<String> {
         let exe = self.exe_path()?;
-        let mut command = std::process::Command::new("powershell");
+        let mut command = std::process::Command::new(super::powershell_exe());
         command
             .arg("-NoProfile")
             .arg("-Command")
@@ -259,22 +259,39 @@ impl PrismLauncherProvider {
             .filter_map(|file| Self::parse_modrinth_url(file.downloads.first()?))
             .collect();
 
-        let results: Vec<Option<bool>> = std::thread::scope(|scope| {
-            let handles: Vec<_> = checks
-                .iter()
-                .map(|(project_id, version_id)| scope.spawn(|| Self::check_one_mod(&client, project_id, version_id)))
-                .collect();
-            handles.into_iter().map(|h| h.join().unwrap_or(None)).collect()
-        });
-
-        let checked_any = results.iter().any(|r| r.is_some());
-        if results.iter().any(|r| *r == Some(true)) {
-            UpdateStatus::UpdateAvailable
-        } else if checked_any {
-            UpdateStatus::UpToDate
-        } else {
-            UpdateStatus::Unknown
+        // Bounded batches instead of one thread + request per mod at once:
+        // a large pack used to fire hundreds of simultaneous requests, which
+        // a rate limiter answers with errors (counted as failed checks).
+        let mut results: Vec<Option<bool>> = Vec::with_capacity(checks.len());
+        for batch in checks.chunks(MAX_CONCURRENT_MOD_CHECKS) {
+            let batch_results: Vec<Option<bool>> = std::thread::scope(|scope| {
+                let handles: Vec<_> = batch
+                    .iter()
+                    .map(|(project_id, version_id)| scope.spawn(|| Self::check_one_mod(&client, project_id, version_id)))
+                    .collect();
+                handles.into_iter().map(|h| h.join().unwrap_or(None)).collect()
+            });
+            results.extend(batch_results);
         }
+        status_from_mod_checks(&results)
+    }
+}
+
+/// At most this many Modrinth requests in flight at once per instance.
+const MAX_CONCURRENT_MOD_CHECKS: usize = 8;
+
+/// Combines per-mod results (`Some(true)` = newer version exists,
+/// `Some(false)` = current, `None` = could not be checked). A confirmed newer
+/// version is a real finding even if other checks failed. "Up to date" is
+/// claimed only when EVERY mod was checked successfully — one success among
+/// many failures proves nothing about the rest, so that is `Unknown`.
+fn status_from_mod_checks(results: &[Option<bool>]) -> UpdateStatus {
+    if results.contains(&Some(true)) {
+        UpdateStatus::UpdateAvailable
+    } else if !results.is_empty() && results.iter().all(|r| *r == Some(false)) {
+        UpdateStatus::UpToDate
+    } else {
+        UpdateStatus::Unknown
     }
 }
 
@@ -306,8 +323,7 @@ impl LauncherProvider for PrismLauncherProvider {
             name: "PrismLauncher (app)".to_string(),
             installed_build: app_version,
             status: app_status,
-            size_bytes: None,
-            last_updated: None,
+            ..Game::default()
         });
 
         for entry in entries.flatten() {
@@ -329,8 +345,14 @@ impl LauncherProvider for PrismLauncherProvider {
                 name,
                 installed_build: installed_version,
                 status,
-                size_bytes: None,
-                last_updated: last_played_ms.map(|ms| ms / 1000),
+                // lastLaunchTime is set to "now" (ms since epoch) each time the
+                // instance starts — BaseInstance::setRunning in
+                // PrismLauncher's launcher/BaseInstance.cpp (read from the
+                // source this session). 0 = never launched (the setting's
+                // default), reported as None. Previously this value was
+                // mislabelled `last_updated`; that field is no longer set here.
+                last_played: last_played_ms.filter(|ms| *ms != 0).map(|ms| ms / 1000),
+                ..Game::default()
             });
         }
         Ok(games)
@@ -346,16 +368,35 @@ impl LauncherProvider for PrismLauncherProvider {
 
     fn trigger_update(&self, _game_id: &str) -> Result<(), String> {
         let exe = self.exe_path().ok_or("PrismLauncher not installed")?;
-        std::process::Command::new(exe)
-            .spawn()
-            .map(|_| ())
-            .map_err(|e| e.to_string())
+        super::spawn_exe(&exe, None)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn mod_checks_all_current_is_up_to_date() {
+        assert_eq!(status_from_mod_checks(&[Some(false), Some(false)]), UpdateStatus::UpToDate);
+    }
+
+    #[test]
+    fn mod_checks_partial_failure_is_unknown_not_up_to_date() {
+        // The bug: 1 success among failures used to report "Up to date".
+        assert_eq!(status_from_mod_checks(&[Some(false), None, None]), UpdateStatus::Unknown);
+    }
+
+    #[test]
+    fn mod_checks_a_confirmed_newer_version_wins_even_with_failures() {
+        assert_eq!(status_from_mod_checks(&[None, Some(true), Some(false)]), UpdateStatus::UpdateAvailable);
+    }
+
+    #[test]
+    fn mod_checks_empty_or_all_failed_is_unknown() {
+        assert_eq!(status_from_mod_checks(&[]), UpdateStatus::Unknown);
+        assert_eq!(status_from_mod_checks(&[None, None]), UpdateStatus::Unknown);
+    }
 
     #[test]
     fn version_triplet_ignores_trailing_build_revision() {

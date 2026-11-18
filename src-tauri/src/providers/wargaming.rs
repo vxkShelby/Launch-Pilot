@@ -117,8 +117,7 @@ impl WargamingProvider {
             name: folder_name,
             installed_build: version_name,
             status: if has_pending_update { UpdateStatus::UpdateAvailable } else { UpdateStatus::UpToDate },
-            size_bytes: None,
-            last_updated: None,
+            ..Game::default()
         })
     }
 
@@ -130,7 +129,9 @@ impl WargamingProvider {
     // as the Age of the Ring provider: scan drive letters for that path
     // rather than hardcode this machine's drive letter.
     fn find_client_exe() -> Option<PathBuf> {
-        for drive in 'C'..='Z' {
+        // Fixed/removable drives only: probing a mapped network drive whose
+        // server is down blocks until the redirector times out.
+        for drive in super::scannable_drive_letters() {
             let candidate = PathBuf::from(format!("{drive}:\\Wargaming.net\\GameCenter\\wgc.exe"));
             if candidate.exists() {
                 return Some(candidate);
@@ -159,7 +160,7 @@ impl LauncherProvider for WargamingProvider {
 
     fn trigger_update(&self, _game_id: &str) -> Result<(), String> {
         let exe = Self::find_client_exe().ok_or("Wargaming Game Center executable not found")?;
-        std::process::Command::new(exe).spawn().map(|_| ()).map_err(|e| e.to_string())
+        super::spawn_exe(&exe, None)
     }
 
     fn process_names(&self) -> &'static [&'static str] {

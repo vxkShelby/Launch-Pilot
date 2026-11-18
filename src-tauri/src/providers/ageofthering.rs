@@ -40,7 +40,10 @@ pub struct AgeOfTheRingProvider;
 
 impl AgeOfTheRingProvider {
     fn find_install(&self) -> Option<PathBuf> {
-        for drive in 'C'..='Z' {
+        // Fixed/removable drives only (see `scannable_drive_letters`): an
+        // install on a mapped network drive is therefore not detected — an
+        // addition to this heuristic's already-disclosed limits.
+        for drive in super::scannable_drive_letters() {
             let path = PathBuf::from(format!("{drive}:\\{RELATIVE_EXE}"));
             if path.exists() {
                 return Some(path);
@@ -101,8 +104,7 @@ impl LauncherProvider for AgeOfTheRingProvider {
                 name: name.to_string(),
                 installed_build: if *id == "aotr" { Self::version(&exe_path) } else { None },
                 status: UpdateStatus::Unknown,
-                size_bytes: None,
-                last_updated: None,
+                ..Game::default()
             });
         }
         Ok(games)
@@ -118,10 +120,7 @@ impl LauncherProvider for AgeOfTheRingProvider {
 
     fn trigger_update(&self, _game_id: &str) -> Result<(), String> {
         let exe = self.find_install().ok_or("Age of the Ring not found")?;
-        std::process::Command::new(exe)
-            .spawn()
-            .map(|_| ())
-            .map_err(|e| e.to_string())
+        super::spawn_exe(&exe, None)
     }
 }
 

@@ -20,8 +20,43 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
 
+      # The version lives in package.json, Cargo.toml, tauri.conf.json (and is
+      # shown in index.html). The updater's latest.json takes it from
+      # tauri.conf.json, so a tag that disagrees with it publishes a release
+      # no installed copy will ever update to. Fail before building instead.
+      # Also yields the release tag: pushed tags are verified against the
+      # version; a manual run has no tag of its own (github.ref_name would be
+      # the branch, e.g. "main"), so it derives v<version> instead.
+      - name: Verify version consistency and resolve release tag
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+          conf=$(node -p "require('./src-tauri/tauri.conf.json').version")
+          pkg=$(node -p "require('./package.json').version")
+          cargo=$(grep -m1 -E '^version[[:space:]]*=' src-tauri/Cargo.toml | sed -E 's/^version[[:space:]]*=[[:space:]]*"([^"]+)".*/\1/')
+          html=$(grep -oE 'class="version[^"]*">v[0-9][0-9A-Za-z.+-]*' index.html | head -1 | sed -E 's/.*>v//' || true)
+          echo "tauri.conf.json=$conf package.json=$pkg Cargo.toml=$cargo index.html=${html:-<not found>}"
+          fail=0
+          [ "$pkg" = "$conf" ] || { echo "::error::package.json version ($pkg) != tauri.conf.json ($conf)"; fail=1; }
+          [ "$cargo" = "$conf" ] || { echo "::error::Cargo.toml version ($cargo) != tauri.conf.json ($conf)"; fail=1; }
+          if [ -n "$html" ] && [ "$html" != "$conf" ]; then echo "::error::index.html version (v$html) != tauri.conf.json ($conf)"; fail=1; fi
+          if [ "$GITHUB_REF_TYPE" = "tag" ]; then
+            [ "$GITHUB_REF_NAME" = "v$conf" ] || { echo "::error::tag $GITHUB_REF_NAME != v$conf (tauri.conf.json)"; fail=1; }
+          fi
+          [ "$fail" = 0 ] || exit 1
+          echo "tag=v$conf" >> "$GITHUB_OUTPUT"
+
       - name: Install frontend dependencies
         run: npm ci
+
+      # Tauri's generate_context! needs the built frontend (frontendDist) to
+      # exist, so build it before compiling the crate for tests.
+      - name: Build frontend
+        run: npm run build
+
+      - name: Rust tests
+        run: cargo test --locked --manifest-path src-tauri/Cargo.toml
 
       - uses: tauri-apps/tauri-action@v1
         env:
@@ -29,7 +64,7 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
-          tagName: ${{ github.ref_name }}
-          releaseName: "LaunchPilot ${{ github.ref_name }}"
+          tagName: ${{ steps.version.outputs.tag }}
+          releaseName: "LaunchPilot ${{ steps.version.outputs.tag }}"
           releaseDraft: true
           prerelease: false

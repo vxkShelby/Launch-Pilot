@@ -5,6 +5,13 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>LaunchPilot — one dashboard for every game launcher</title>
 <meta name="description" content="LaunchPilot reads what Steam, GOG, EA, Ubisoft Connect, Battle.net and more already know locally and shows update status in one dashboard. Free, Windows, no accounts." />
+<link rel="icon" type="image/png" href="logo.png" />
+<meta property="og:type" content="website" />
+<meta property="og:title" content="LaunchPilot — one dashboard for every game launcher" />
+<meta property="og:description" content="See what needs updating across Steam, Epic, GOG, EA, Ubisoft Connect, Battle.net and more. Free, Windows, no accounts, says Unknown instead of guessing." />
+<!-- og:image must be absolute; assumes GitHub Pages serves docs/ at this URL — adjust if the site lives elsewhere. -->
+<meta property="og:image" content="https://vxkshelby.github.io/Launch-Pilot/screenshot.png" />
+<meta name="twitter:card" content="summary_large_image" />
 <style>
 @font-face {
   font-family: "IBM Plex Sans";
@@ -37,8 +44,8 @@
   --line: #2a2b30;
   --line-soft: #212227;
   --ink: #e9e7e0;
-  --ink-dim: #8d8d87;
-  --ink-faint: #5b5b57;
+  --ink-dim: #8d8d87;       /* 5.57:1 on --bg-0, 4.81:1 on --bg-2 (WCAG AA body text) */
+  --ink-faint: #5b5b57;     /* 2.72:1 — decorative only (never use for text) */
   --amber: #e8a33d;
   --amber-dim: #3a2c14;
   --blue: #7fa8d9;
@@ -139,13 +146,13 @@ a { color: inherit; }
   background: var(--bg-2);
 }
 
-.btn-secondary:hover { border-color: var(--ink-faint); }
+.btn-secondary:hover { border-color: var(--ink-dim); }
 
 .meta-line {
   margin-top: 0.9rem;
   font-family: var(--font-mono);
   font-size: 0.78rem;
-  color: var(--ink-faint);
+  color: var(--ink-dim);
 }
 
 .shot {
@@ -162,18 +169,18 @@ a { color: inherit; }
   height: auto;
 }
 
-section.launchers {
+section.launchers, section.not {
   padding: 3.5rem 0 1rem;
   border-top: 1px solid var(--line);
 }
 
-.launchers h2 {
+.launchers h2, .not h2 {
   font-size: 1.15rem;
   font-weight: 600;
   margin: 0 0 0.4rem;
 }
 
-.launchers > p {
+.launchers > p, .not > p {
   color: var(--ink-dim);
   font-size: 0.92rem;
   max-width: 56ch;
@@ -202,8 +209,9 @@ section.launchers {
   color: var(--ink-dim);
 }
 
+/* Amber means "needs your attention" in the app; here "live" is plain emphasis. */
 .lane-detail .live {
-  color: var(--amber);
+  color: var(--ink);
   font-weight: 600;
 }
 
@@ -211,17 +219,21 @@ footer {
   padding: 3rem 0 4rem;
   border-top: 1px solid var(--line);
   margin-top: 2.5rem;
-  color: var(--ink-faint);
+  color: var(--ink-dim);
   font-size: 0.85rem;
 }
 
 footer a {
-  color: var(--ink-dim);
+  color: var(--ink);
   text-decoration: underline;
   text-underline-offset: 2px;
 }
 
-footer a:hover { color: var(--ink); }
+footer a:hover { color: var(--amber); }
+
+.not-list { margin: 0; padding-left: 1.1rem; color: var(--ink-dim); font-size: 0.9rem; }
+.not-list li { margin: 0.35rem 0; }
+.not-list strong { color: var(--ink); font-weight: 600; }
 
 @media (max-width: 560px) {
   .hero h1 { font-size: 1.65rem; }
@@ -232,13 +244,14 @@ footer a:hover { color: var(--ink); }
 </head>
 <body>
 <div class="wrap">
-  <div class="top">
+  <header class="top">
     <div class="brand">
       <img src="logo.png" alt="" />
       <span>LaunchPilot</span>
     </div>
-  </div>
+  </header>
 
+  <main>
   <div class="hero">
     <h1>One dashboard for every game launcher on your PC.</h1>
     <p>
@@ -250,10 +263,11 @@ footer a:hover { color: var(--ink); }
       <a class="btn btn-primary" href="https://github.com/vxkShelby/Launch-Pilot/releases/latest">Download for Windows</a>
       <a class="btn btn-secondary" href="https://github.com/vxkShelby/Launch-Pilot">View on GitHub</a>
     </div>
-    <div class="meta-line">v0.7.1 · free · ~2.3 MB installer · no accounts, no scraping</div>
+    <!-- Version: the only hand-set version string on this page. Download links always follow releases/latest. -->
+    <div class="meta-line">v0.9.0 · free · Windows · no accounts, no telemetry</div>
 
     <div class="shot">
-      <img src="screenshot.png" alt="LaunchPilot dashboard showing Steam, GOG, EA, Ubisoft Connect and Battle.net with real update status" />
+      <img src="screenshot.png" width="1116" height="759" alt="LaunchPilot dashboard listing installed games per launcher with their update status" />
     </div>
   </div>
 
@@ -266,51 +280,64 @@ footer a:hover { color: var(--ink); }
 
     <div class="lane">
       <div class="lane-name">Steam</div>
-      <div class="lane-detail"><span class="live">Live status</span> — full local build-id comparison, plus one-click update trigger</div>
+      <div class="lane-detail"><span class="live">Update status</span> — installed build-id vs. the build Steam is targeting. Update opens Steam on that game; Launch starts it.</div>
     </div>
     <div class="lane">
       <div class="lane-name">GOG Galaxy</div>
-      <div class="lane-detail"><span class="live">Live status</span> — checked against GOG's own public API, no login</div>
+      <div class="lane-detail"><span class="live">Update status</span> — installed build vs. GOG's own public content API, no login. Launch starts the game.</div>
     </div>
     <div class="lane">
       <div class="lane-name">PrismLauncher</div>
-      <div class="lane-detail"><span class="live">Live status</span> — launcher self-update via GitHub releases, plus per-instance mod updates on Modrinth packs</div>
-    </div>
-    <div class="lane">
-      <div class="lane-name">EA app</div>
-      <div class="lane-detail"><span class="live">Live status</span> — detects an update in progress from local staging files</div>
-    </div>
-    <div class="lane">
-      <div class="lane-name">Battle.net</div>
-      <div class="lane-detail"><span class="live">Live status</span> — detects an update in progress from local log state</div>
+      <div class="lane-detail"><span class="live">Update status</span> — the launcher itself via GitHub releases, plus per-mod updates on Modrinth pack instances only</div>
     </div>
     <div class="lane">
       <div class="lane-name">Wargaming Game Center</div>
-      <div class="lane-detail"><span class="live">Live status</span> — compares installed vs. available from local game_info.xml</div>
+      <div class="lane-detail"><span class="live">Update status</span> — installed vs. available version from each game's local game_info.xml</div>
     </div>
     <div class="lane">
       <div class="lane-name">Epic Games</div>
-      <div class="lane-detail"><span class="live">Live status</span> — detects an update in progress from the launcher's own manifest flag plus active staging writes</div>
+      <div class="lane-detail"><span class="live">Live "Updating"</span> — in-progress installs from the launcher's own manifest flag plus active staging writes. A queued update that hasn't started shows Unknown.</div>
+    </div>
+    <div class="lane">
+      <div class="lane-name">EA app</div>
+      <div class="lane-detail"><span class="live">Live "Updating"</span> — detected from local staging files; a stalled download shows Update available. Otherwise Unknown. Launch starts the game.</div>
+    </div>
+    <div class="lane">
+      <div class="lane-name">Battle.net</div>
+      <div class="lane-detail"><span class="live">Live "Updating"</span> — detected from local log state. Otherwise Unknown.</div>
     </div>
     <div class="lane">
       <div class="lane-name">Ubisoft Connect</div>
-      <div class="lane-detail">Detected, games listed, real running/not-running signal — no local update field exists</div>
+      <div class="lane-detail">Games listed (including Ubisoft titles installed through Steam) and a real running/not-running signal. Update status is Unknown — no local field exists. Launch starts the game.</div>
     </div>
     <div class="lane">
       <div class="lane-name">Riot Client</div>
-      <div class="lane-detail">Detected, games listed — no local update field exists to read</div>
+      <div class="lane-detail">Detected, games listed. Update status is Unknown — no local field exists to read.</div>
     </div>
     <div class="lane">
       <div class="lane-name">Age of the Ring</div>
-      <div class="lane-detail">Detected via drive scan (heuristic, no installer footprint to check) — no update field</div>
+      <div class="lane-detail">Detected via drive scan (heuristic, no installer footprint to check). Update status is Unknown.</div>
     </div>
   </section>
 
+  <section class="not">
+    <h2>What it doesn't do</h2>
+    <ul class="not-list">
+      <li><strong>No accounts or logins.</strong> It never asks for a password or signs in to anything.</li>
+      <li><strong>No telemetry.</strong> The only network requests are each launcher's public update endpoint (e.g. GOG, GitHub, Modrinth) and a signed self-update check for LaunchPilot. Nothing about you or your library is sent.</li>
+      <li><strong>No guessing.</strong> Where a launcher exposes no local update info, the status is Unknown.</li>
+      <li><strong>No downloading games itself.</strong> Update opens the real launcher; the launcher does the download.</li>
+      <li><strong>Windows only.</strong></li>
+    </ul>
+  </section>
+  </main>
+
   <footer>
-    Windows only. Built with Tauri, Rust and TypeScript.
+    Built with Tauri, Rust and TypeScript.
     Source on <a href="https://github.com/vxkShelby/Launch-Pilot">GitHub</a>.
     <a href="https://github.com/vxkShelby/Launch-Pilot/issues/new?template=bug_report.md">Report a bug</a>.
     <a href="https://github.com/vxkShelby/Launch-Pilot/blob/main/PRIVACY.md">Privacy</a>.
+    <a href="https://github.com/vxkShelby/Launch-Pilot/blob/main/SUPPORT.md">Support</a>.
     <a href="https://github.com/vxkShelby/Launch-Pilot/discussions">Discussions</a>.
   </footer>
 </div>

@@ -16,6 +16,16 @@ LaunchPilot collects nothing and sends nothing.
 - **Crash logs stay on your machine.** If LaunchPilot crashes, one line is
   appended to `%APPDATA%\LaunchPilot\crash.log`. That file never leaves your
   computer unless you attach it yourself to a bug report.
+- **Optional background features (all off by default).** In Settings you can
+  turn on a tray icon (the app keeps running after you close the window),
+  update notifications, and start-with-Windows. Turning them on stores two
+  flags in `%APPDATA%\LaunchPilot\settings.json`; start-with-Windows adds a
+  `LaunchPilot` value under `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`
+  (plus the `StartupApproved` flag Windows manages itself), and turning it off
+  removes it. Notifications are local Windows toasts showing a game name from
+  your own library; nothing is sent anywhere. With the tray on, the periodic
+  update check (including the check for a newer LaunchPilot release) can run
+  while the window is hidden.
 
 If this ever changes, it'll be in a release's changelog, not buried in an
 update.

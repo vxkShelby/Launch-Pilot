@@ -2,7 +2,7 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="color-scheme" content="dark" />
+    <meta name="color-scheme" content="dark light" />
     <link rel="stylesheet" href="/src/styles.css" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>LaunchPilot</title>
@@ -13,32 +13,82 @@
     <header class="topbar">
       <div class="brand">
         <h1>LaunchPilot</h1>
-        <span class="version muted">v0.8.3</span>
+        <span class="version muted">v0.9.0</span>
       </div>
       <div id="stats" class="stats muted"></div>
       <div class="controls">
-        <input id="search" type="search" placeholder="Filter games…" />
+        <label class="visually-hidden" for="search">Filter games</label>
+        <input id="search" type="search" placeholder="Filter games…" autocomplete="off" />
         <button id="update-all-btn" hidden>Update all</button>
-        <button id="refresh-btn" class="icon-btn" title="Refresh now">&#8635;</button>
-        <button id="settings-btn" class="icon-btn" title="Settings">&#9881;</button>
+        <button id="refresh-btn" class="icon-btn" aria-label="Refresh now" title="Refresh now (F5)">
+          <svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M13.5 8a5.5 5.5 0 1 1-1.6-3.9" />
+            <path d="M13.5 2.5v3h-3" />
+          </svg>
+        </button>
+        <button id="settings-btn" class="icon-btn" aria-label="Settings" title="Settings" aria-haspopup="dialog">
+          <svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true">
+            <path d="M2 4.5h7M12.5 4.5H14M2 11.5h1.5M7 11.5h7" />
+            <circle cx="10.75" cy="4.5" r="1.75" />
+            <circle cx="5.25" cy="11.5" r="1.75" />
+          </svg>
+        </button>
       </div>
     </header>
 
-    <main class="container">
-      <p id="update-status" class="muted"></p>
-      <div id="game-list" class="muted">Loading games&hellip;</div>
+    <div class="toolbar">
+      <div id="status-chips" class="chips" role="group" aria-label="Show games by status">
+        <button class="chip" data-filter="all" aria-pressed="true">All</button>
+        <button class="chip" data-filter="pending" aria-pressed="false">Needs update</button>
+        <button class="chip" data-filter="up_to_date" aria-pressed="false">Up to date</button>
+        <button class="chip" data-filter="unknown" aria-pressed="false">Unknown</button>
+      </div>
+      <label class="sort-label">
+        Sort
+        <select id="sort-select">
+          <option value="name">Name</option>
+          <option value="status">Status</option>
+          <option value="last_played">Last played</option>
+          <option value="size">Size</option>
+        </select>
+      </label>
+      <button id="copy-report-btn" title="Copy a text report of the list below to the clipboard">Copy report</button>
+    </div>
+
+    <main class="container" id="container">
+      <div id="banner-area">
+        <div id="update-banner" class="banner" hidden>
+          <span id="update-status" role="status" aria-live="polite"></span>
+          <button id="update-install-btn" hidden>Install &amp; restart</button>
+        </div>
+        <p id="action-status" class="banner banner-quiet" role="status" aria-live="polite" hidden></p>
+      </div>
+      <div id="game-list" aria-busy="true"><p class="muted empty-state" id="initial-loading">Loading games&hellip;</p></div>
+      <p id="empty-state" class="muted empty-state" hidden></p>
+      <details id="not-detected" class="not-detected" hidden>
+        <summary id="not-detected-summary"></summary>
+        <p id="not-detected-list" class="muted"></p>
+      </details>
     </main>
 
-    <div id="onboarding-panel" class="settings-panel" hidden>
-      <div class="settings-card onboarding-card">
-        <h2>Welcome to LaunchPilot</h2>
+    <footer class="statusbar">
+      <span id="last-checked" class="muted"></span>
+      <span class="hint muted">Ctrl+F filter &middot; F5 refresh &middot; Esc close</span>
+    </footer>
+
+    <!-- Screen-reader-only live region: announces a refresh once, not once per launcher. -->
+    <div id="sr-status" class="visually-hidden" role="status" aria-live="polite"></div>
+
+    <dialog id="onboarding-panel" aria-labelledby="onboarding-title">
+      <div class="dialog-card">
+        <h2 id="onboarding-title">Welcome to LaunchPilot</h2>
         <p class="onboarding-intro">
           LaunchPilot reads what your installed launchers already know, locally — no accounts, no
           telemetry, nothing about your library ever leaves this machine.
         </p>
         <ul class="onboarding-legend">
           <li><span class="status status-up_to_date">Up to date</span> No update pending.</li>
-          <li><span class="status status-update_available">Update available</span> Action needed.</li>
+          <li><span class="status status-update_available">Update available</span> Action needed. Launchers with pending updates open first.</li>
           <li><span class="status status-updating">Updating…</span> Install is in progress.</li>
           <li>
             <span class="status status-unknown">Unknown</span>
@@ -46,16 +96,24 @@
           </li>
           <li>
             <span class="running-dot running-dot-on"></span><span class="running-dot running-dot-off"></span>
-            Whether that launcher's process is currently running.
+            Filled dot: that launcher's process is running. Hollow: it is not.
           </li>
         </ul>
-        <button id="onboarding-close">Got it</button>
+        <p class="onboarding-intro">
+          Fields a launcher doesn't provide (size, last played, build) are left out, never guessed.
+          Use Ignore on a pending update to leave it out of the counts and Update all; restore it in
+          Settings. A tray icon, new-update notifications and Start with Windows are also in
+          Settings; all three are off until you turn them on.
+        </p>
+        <form method="dialog" class="dialog-actions">
+          <button id="onboarding-close" autofocus>Got it</button>
+        </form>
       </div>
-    </div>
+    </dialog>
 
-    <div id="settings-panel" class="settings-panel" hidden>
-      <div class="settings-card">
-        <h2>Settings</h2>
+    <dialog id="settings-panel" aria-labelledby="settings-title">
+      <div class="dialog-card">
+        <h2 id="settings-title">Settings</h2>
         <label class="settings-row">
           Auto-refresh every
           <select id="interval-select">
@@ -65,12 +123,71 @@
             <option value="60">60 minutes</option>
           </select>
         </label>
-        <button id="settings-close">Close</button>
+        <label class="settings-row">
+          Theme
+          <select id="theme-select">
+            <option value="system">System</option>
+            <option value="dark">Dark</option>
+            <option value="light">Light</option>
+          </select>
+        </label>
+        <section class="settings-section" aria-labelledby="background-title">
+          <h3 id="background-title">Background</h3>
+          <p class="muted settings-note">
+            All off by default. Nothing is sent anywhere: notifications are local Windows toasts and these
+            choices are stored on this PC only.
+          </p>
+          <label class="settings-check">
+            <input type="checkbox" id="opt-tray" />
+            Show tray icon &amp; keep running in tray when closed
+          </label>
+          <label class="settings-check">
+            <input type="checkbox" id="opt-notify" />
+            Notify me when a new update is found
+          </label>
+          <label class="settings-check">
+            <input type="checkbox" id="opt-autostart" />
+            Start with Windows (minimized to tray)
+          </label>
+          <p class="muted settings-note">
+            Notifications appear only while the window is hidden or unfocused. With the tray icon off, Start
+            with Windows opens the normal window instead.
+          </p>
+          <p id="opt-error" class="settings-note opt-error" role="alert" hidden></p>
+        </section>
+        <section class="settings-section" aria-labelledby="ignored-title">
+          <h3 id="ignored-title">Ignored updates</h3>
+          <p id="ignored-empty" class="muted settings-note">Nothing ignored.</p>
+          <ul id="ignored-list" class="ignored-list"></ul>
+        </section>
+        <section class="settings-section" aria-labelledby="shortcuts-title">
+          <h3 id="shortcuts-title">Keyboard shortcuts</h3>
+          <ul class="shortcut-list">
+            <li><kbd>Ctrl</kbd>+<kbd>F</kbd> Focus the filter box</li>
+            <li><kbd>F5</kbd> or <kbd>Ctrl</kbd>+<kbd>R</kbd> Refresh now</li>
+            <li><kbd>Esc</kbd> Close a dialog, or clear the filter</li>
+          </ul>
+        </section>
+        <form method="dialog" class="dialog-actions">
+          <button id="settings-close">Close</button>
+        </form>
       </div>
-    </div>
+    </dialog>
 
-    <footer class="statusbar">
-      <span id="last-checked" class="muted"></span>
-    </footer>
+    <dialog id="confirm-panel" aria-labelledby="confirm-title">
+      <div class="dialog-card">
+        <h2 id="confirm-title">Update all?</h2>
+        <p id="confirm-body" class="settings-note"></p>
+        <ul id="confirm-list" class="confirm-list"></ul>
+        <p id="confirm-size" class="settings-note"></p>
+        <p class="muted settings-note">
+          LaunchPilot asks each launcher to start the update. What happens next is up to the launcher.
+        </p>
+        <form method="dialog" class="dialog-actions">
+          <button value="cancel">Cancel</button>
+          <button id="confirm-go" value="go" class="btn-primary">Send update requests</button>
+        </form>
+      </div>
+    </dialog>
   </body>
 </html>

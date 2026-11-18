@@ -94,7 +94,9 @@ impl BattleNetProvider {
         content
             .lines()
             .rev()
-            .find(|line| line.contains("[InstallManager] Operation status changed") && line.contains(&marker))
+            // Whole-token match: a substring test would let `agentUid=wow`
+            // also match `agentUid=wow_classic`.
+            .find(|line| line.contains("[InstallManager] Operation status changed") && line.split_whitespace().any(|t| t == marker))
             .is_some_and(|line| line.contains("newStatus=On"))
     }
 }
@@ -120,6 +122,11 @@ impl LauncherProvider for BattleNetProvider {
         // Read the newest log once up front rather than once per installed
         // game — see latest_log_content's doc comment.
         let log_content = Self::latest_log_content();
+        // Staleness guard: the log only records status *changes*, so if
+        // Battle.net exits or crashes mid-update the last line for the game
+        // stays `newStatus=On` forever. An update can only be running while
+        // the client process is alive, so without it the log is ignored.
+        let client_running = super::running_process_names().contains("battle.net.exe");
 
         for uninstall_path in UNINSTALL_KEYS {
             let Ok(uninstall_key) = hklm.open_subkey(uninstall_path) else {
@@ -155,13 +162,12 @@ impl LauncherProvider for BattleNetProvider {
                     id: uid.to_string(),
                     name,
                     installed_build: version,
-                    status: if log_content.as_deref().is_some_and(|c| Self::is_updating(c, uid)) {
+                    status: if client_running && log_content.as_deref().is_some_and(|c| Self::is_updating(c, uid)) {
                         UpdateStatus::Updating
                     } else {
                         UpdateStatus::Unknown
                     },
-                    size_bytes: None,
-                    last_updated: None,
+                    ..Game::default()
                 });
             }
         }
@@ -189,5 +195,35 @@ impl LauncherProvider for BattleNetProvider {
 
     fn trigger_update(&self, _game_id: &str) -> Result<(), String> {
         open::that("battlenet://").map_err(|e| e.to_string())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Line shape copied from the comment above (observed in a real
+    // Battle.net log during the client's own self-update).
+    fn line(status: &str, uid: &str) -> String {
+        format!("[InstallManager] Operation status changed: opType=Update oldStatus=Off newStatus={status} agentUid={uid}")
+    }
+
+    #[test]
+    fn latest_status_line_for_the_uid_decides() {
+        let log = format!("{}\n{}\n", line("On", "wow"), line("Off", "wow"));
+        assert!(!BattleNetProvider::is_updating(&log, "wow"));
+        let log = format!("{}\n{}\n", line("Off", "wow"), line("On", "wow"));
+        assert!(BattleNetProvider::is_updating(&log, "wow"));
+    }
+
+    #[test]
+    fn uid_that_is_a_prefix_of_another_uid_does_not_match() {
+        assert!(!BattleNetProvider::is_updating(&line("On", "wow_classic"), "wow"));
+        assert!(BattleNetProvider::is_updating(&line("On", "wow_classic"), "wow_classic"));
+    }
+
+    #[test]
+    fn other_games_lines_are_ignored() {
+        assert!(!BattleNetProvider::is_updating(&line("On", "d3"), "wow"));
     }
 }

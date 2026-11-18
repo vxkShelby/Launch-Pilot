@@ -1,70 +1,13 @@
-use crate::providers::{all_providers, Game};
+use crate::providers::{all_providers, running_process_names, Game};
 use serde::Serialize;
 
-/// Real, single Windows process snapshot via the built-in `tasklist` tool
-/// (no extra dependency, works on any Windows install) — one call covers
-/// every provider instead of spawning a process per launcher.
-///
-/// Tried and reverted: gating this on "owns a visible top-level window"
-/// (via EnumWindows/IsWindowVisible) to fix a real false positive — Ubisoft
-/// Connect's `upc.exe` stays alive as a backgrounded/tray process after the
-/// user closes the client, so process-presence alone reports it as running
-/// when it isn't. But verified live with a raw EnumWindows dump that this
-/// doesn't actually distinguish the cases: Steam, while genuinely open but
-/// minimized to tray, owns only the exact same shape of window — hidden
-/// (IsWindowVisible=false), with a real title ("Steam" / "Ubisoft
-/// Connect"). Windows doesn't expose a reliable "is this a real closed
-/// client vs. minimized-to-tray" signal short of parsing the notification
-/// area itself, which is out of scope. Reverted to plain process presence:
-/// correct for every launcher tested except Ubisoft Connect's tray-resident
-/// helper, a disclosed known limitation rather than a fragile heuristic
-/// that broke Steam to partially fix Ubisoft.
-///
-/// Bug fix, verified live: `provider_data` is called once per launcher (10
-/// parallel invokes per dashboard load/refresh), and each one used to spawn
-/// its own `tasklist` process — 10 child console processes at once on every
-/// startup. Two real problems from that, both fixed here: (1) `tasklist`
-/// inherits a visible console window unless explicitly told not to (Rust's
-/// std::process::Command doesn't set that by default), so the user saw cmd
-/// windows flash on launch; (2) spawning + waiting on 10 of them at once is
-/// real OS overhead that was visible as LaunchPilot going "Not Responding"
-/// momentarily. Fixed by adding the CREATE_NO_WINDOW flag (suppresses the
-/// console) and caching the one real snapshot for a couple of seconds so
-/// concurrent provider_data calls from the same refresh share it instead of
-/// each spawning their own.
-fn running_process_names() -> std::collections::HashSet<String> {
-    use std::sync::{Mutex, OnceLock};
-    use std::time::{Duration, Instant};
-
-    static CACHE: OnceLock<Mutex<Option<(Instant, std::collections::HashSet<String>)>>> = OnceLock::new();
-    let cache = CACHE.get_or_init(|| Mutex::new(None));
-    let mut guard = cache.lock().unwrap_or_else(|e| e.into_inner());
-    if let Some((fetched_at, names)) = guard.as_ref() {
-        if fetched_at.elapsed() < Duration::from_secs(2) {
-            return names.clone();
-        }
-    }
-
-    let mut command = std::process::Command::new("tasklist");
-    command.arg("/FO").arg("CSV").arg("/NH");
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        const CREATE_NO_WINDOW: u32 = 0x08000000;
-        command.creation_flags(CREATE_NO_WINDOW);
-    }
-
-    let names: std::collections::HashSet<String> = match command.output() {
-        Ok(output) => String::from_utf8_lossy(&output.stdout)
-            .lines()
-            .filter_map(|line| line.split(',').next())
-            .map(|name| name.trim_matches('"').to_ascii_lowercase())
-            .collect(),
-        Err(_) => std::collections::HashSet::new(),
-    };
-    *guard = Some((Instant::now(), names.clone()));
-    names
-}
+// Threading: Tauri runs a plain `fn` command inline on the thread that
+// handles the IPC message, so a provider that waits on a registry scan, a
+// PowerShell spawn or a 4 s network timeout froze the window. Every command
+// that does real work below is `async` and hands its body to
+// `spawn_blocking` (Tauri's own runtime pool), so the webview thread never
+// waits on provider I/O and the per-launcher `provider_data` calls the
+// frontend fires together really do run concurrently.
 
 /// Static id list — fast, no registry/network/process work — so the
 /// frontend can draw a section per launcher immediately and fill each one
@@ -83,6 +26,14 @@ pub struct ProviderResult {
     pub games: Vec<Game>,
     pub running: bool,
     pub can_launch: bool,
+    /// False when the launcher has no honest update trigger (Epic): the
+    /// frontend should not offer an "Update" action for it.
+    pub can_update: bool,
+    /// Set when the launcher is installed but reading its game list failed
+    /// (corrupt/locked config, ...). `games` is then empty and the frontend
+    /// should show "check failed" with this text instead of "no games".
+    /// `None` on success, including a successful empty list.
+    pub error: Option<String>,
 }
 
 /// Reads the real icon Windows itself associates with a local exe/file
@@ -114,6 +65,12 @@ fn extract_icon_data_uri(path: &std::path::Path) -> Option<String> {
     // sourced-Ubisoft game that was failing.
     let normalized = path.to_string_lossy().replace('/', "\\");
     let wide: Vec<u16> = std::ffi::OsStr::new(&normalized).encode_wide().chain(std::iter::once(0)).collect();
+
+    // SHGetFileInfoW wants COM initialised on the calling thread (Microsoft's
+    // docs for it say so). These calls now run on pool threads, not the main
+    // UI thread that Tauri/WebView2 already set up as an STA, so init here
+    // and pair it with CoUninitialize when the guard drops.
+    let _com = ComGuard::init();
 
     unsafe {
         let mut info: SHFILEINFOW = std::mem::zeroed();
@@ -201,29 +158,60 @@ fn extract_icon_data_uri(_path: &std::path::Path) -> Option<String> {
     None
 }
 
-#[tauri::command]
-pub fn launcher_icon(launcher: String) -> Option<String> {
-    let provider = all_providers().into_iter().find(|p| p.id() == launcher)?;
-    let path = provider.icon_source()?;
-    extract_icon_data_uri(&path)
+/// RAII COM initialisation for the current thread (apartment-threaded, the
+/// model the shell icon APIs expect). Only uninitialises if this call
+/// actually added a reference (`S_OK`/`S_FALSE`); an already-initialised
+/// thread in a different mode (`RPC_E_CHANGED_MODE`) is left alone.
+#[cfg(windows)]
+struct ComGuard(bool);
+
+#[cfg(windows)]
+impl ComGuard {
+    fn init() -> Self {
+        use windows_sys::Win32::System::Com::{CoInitializeEx, COINIT_APARTMENTTHREADED, COINIT_DISABLE_OLE1DDE};
+        // SAFETY: plain FFI call with a null reserved pointer, as documented.
+        let hr = unsafe { CoInitializeEx(std::ptr::null(), (COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE) as u32) };
+        ComGuard(hr >= 0)
+    }
+}
+
+#[cfg(windows)]
+impl Drop for ComGuard {
+    fn drop(&mut self) {
+        if self.0 {
+            // SAFETY: balances the successful CoInitializeEx in `init`.
+            unsafe { windows_sys::Win32::System::Com::CoUninitialize() };
+        }
+    }
 }
 
 #[tauri::command]
-pub fn game_icon(launcher: String, game_id: String) -> Option<String> {
+pub async fn launcher_icon(launcher: String) -> Option<String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let provider = all_providers().into_iter().find(|p| p.id() == launcher)?;
+        let path = provider.icon_source()?;
+        extract_icon_data_uri(&path)
+    })
+    .await
+    .unwrap_or(None)
+}
+
+#[tauri::command]
+pub async fn game_icon(launcher: String, game_id: String) -> Option<String> {
     if !is_safe_id(&game_id) {
         return None;
     }
-    let provider = all_providers().into_iter().find(|p| p.id() == launcher)?;
-    let path = provider.game_icon_source(&game_id)?;
-    extract_icon_data_uri(&path)
+    tauri::async_runtime::spawn_blocking(move || {
+        let provider = all_providers().into_iter().find(|p| p.id() == launcher)?;
+        let path = provider.game_icon_source(&game_id)?;
+        extract_icon_data_uri(&path)
+    })
+    .await
+    .unwrap_or(None)
 }
 
-/// Per-launcher detect() + list_games() + running-check, so the frontend
-/// can fire one of these per launcher in parallel and render each as it
-/// finishes rather than waiting for the slowest provider. Returns None for
-/// an undetected launcher (nothing installed) so the frontend can drop it.
-#[tauri::command]
-pub fn provider_data(launcher: String) -> Option<ProviderResult> {
+/// Blocking body of `provider_data`, split out so it runs on a pool thread.
+fn provider_data_blocking(launcher: &str) -> Option<ProviderResult> {
     let provider = all_providers().into_iter().find(|p| p.id() == launcher)?;
     if !provider.detect() {
         return None;
@@ -234,7 +222,12 @@ pub fn provider_data(launcher: String) -> Option<ProviderResult> {
         let running = running_process_names();
         provider.process_names().iter().any(|name| running.contains(&name.to_ascii_lowercase()))
     };
-    let games = provider.list_games().unwrap_or_default();
+    // A failed read is reported, not swallowed: the frontend can tell
+    // "installed, check failed" apart from "installed, zero games".
+    let (games, error) = match provider.list_games() {
+        Ok(games) => (games, None),
+        Err(e) => (Vec::new(), Some(e)),
+    };
 
     Some(ProviderResult {
         id: provider.id(),
@@ -242,54 +235,82 @@ pub fn provider_data(launcher: String) -> Option<ProviderResult> {
         games,
         running: is_running,
         can_launch: provider.supports_launch(),
+        can_update: provider.supports_update(),
+        error,
     })
 }
 
-/// Rejects anything that isn't a plausible id before it reaches a shell-out
-/// or URI (steam://, com.epicgames.launcher://, goggalaxy://, RiotClient
-/// process args) — defense in depth against a compromised/XSS'd frontend
-/// calling trigger_update directly with an attacker-chosen game_id.
+/// Per-launcher detect() + list_games() + running-check, so the frontend
+/// can fire one of these per launcher in parallel and render each as it
+/// finishes rather than waiting for the slowest provider. Resolves to None
+/// for an undetected launcher (nothing installed) so the frontend can drop
+/// it; rejects (Err string) only if the worker thread itself fails.
+#[tauri::command]
+pub async fn provider_data(launcher: String) -> Result<Option<ProviderResult>, String> {
+    tauri::async_runtime::spawn_blocking(move || provider_data_blocking(&launcher))
+        .await
+        .map_err(|e| format!("provider check failed: {e}"))
+}
+
+/// Command-layer guard for ids coming from the frontend. Ids are whatever the
+/// providers themselves emit — Prism instance folder names ("Modern
+/// Industrialization Extra"), Wargaming folder names, registry subkey names —
+/// so this is a deny-list of what is dangerous rather than an allow-list of
+/// what looks tidy (an earlier allow-list rejected real ids with spaces and
+/// the failure was silent in the UI). Rejected: path separators and drive
+/// prefixes (`/ \ :`), characters invalid in Windows file names, control
+/// characters including NUL, over-long ids, and anything that is only dots
+/// and spaces (Windows strips trailing dots/spaces, so `".. "` and `"..."`
+/// can resolve like `".."`). Empty stays allowed: it means "the launcher
+/// itself" (the Open button).
 ///
-/// Security-review finding, fixed: allowing '.' meant "." and ".." both
-/// passed the character-class check (every character in each is '.'), so
-/// this wasn't actually a path-traversal guard despite the doc comment
-/// above claiming it blocks one — no current caller joins game_id as a bare
-/// path segment, so nothing was exploitable yet, but the next one to do
-/// `dir.join(game_id)` would have silently reintroduced traversal. Reject
-/// those two exact values explicitly rather than relying on how callers
-/// happen to use the string today.
+/// Ids that end up inside a protocol URI (steam://, goggalaxy://,
+/// com.epicgames.launcher://) are additionally held to the strict
+/// `providers::uri_safe_id` shape by those providers, so loosening this
+/// layer does not loosen what reaches a URI.
 fn is_safe_id(id: &str) -> bool {
     if id.is_empty() {
         return true;
     }
-    if id == "." || id == ".." {
+    if id.len() > 256 {
         return false;
     }
-    id.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.'))
+    if id.trim_matches(|c| c == '.' || c == ' ').is_empty() {
+        return false;
+    }
+    !id.chars().any(|c| c.is_control() || matches!(c, '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|'))
 }
 
 #[tauri::command]
-pub fn trigger_update(launcher: String, game_id: String) -> Result<(), String> {
+pub async fn trigger_update(launcher: String, game_id: String) -> Result<(), String> {
     if !is_safe_id(&game_id) {
-        return Err("invalid game id".to_string());
+        return Err(format!("invalid game id: {game_id:?}"));
     }
-    let provider = all_providers()
-        .into_iter()
-        .find(|p| p.id() == launcher)
-        .ok_or_else(|| format!("unknown launcher: {launcher}"))?;
-    provider.trigger_update(&game_id)
+    tauri::async_runtime::spawn_blocking(move || {
+        let provider = all_providers()
+            .into_iter()
+            .find(|p| p.id() == launcher)
+            .ok_or_else(|| format!("unknown launcher: {launcher}"))?;
+        provider.trigger_update(&game_id)
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
-pub fn launch_game(launcher: String, game_id: String) -> Result<(), String> {
+pub async fn launch_game(launcher: String, game_id: String) -> Result<(), String> {
     if !is_safe_id(&game_id) {
-        return Err("invalid game id".to_string());
+        return Err(format!("invalid game id: {game_id:?}"));
     }
-    let provider = all_providers()
-        .into_iter()
-        .find(|p| p.id() == launcher)
-        .ok_or_else(|| format!("unknown launcher: {launcher}"))?;
-    provider.launch(&game_id)
+    tauri::async_runtime::spawn_blocking(move || {
+        let provider = all_providers()
+            .into_iter()
+            .find(|p| p.id() == launcher)
+            .ok_or_else(|| format!("unknown launcher: {launcher}"))?;
+        provider.launch(&game_id)
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[cfg(test)]
@@ -316,16 +337,66 @@ mod tests {
 
     #[test]
     fn dot_and_dotdot_embedded_in_a_longer_id_are_still_safe() {
-        // Only the exact "." / ".." values are path-traversal special —
-        // a longer id built from allowed characters is not.
+        // Only ids made purely of dots/spaces are path-traversal special —
+        // a longer id with real characters is not.
         assert!(is_safe_id("..foo"));
         assert!(is_safe_id("a.b..c"));
     }
 
     #[test]
-    fn shell_and_path_metacharacters_are_rejected() {
-        for id in ["with space", "a/b", "a\\b", "C:\\x", "a;b", "a&b", "a|b", "a\"b"] {
+    fn ids_every_provider_really_emits_are_accepted() {
+        // Prism: instance folder name, verified on the reference machine.
+        assert!(is_safe_id("Modern Industrialization Extra"));
+        assert!(is_safe_id("1.21.11"));
+        // Prism synthetic app row, Wargaming folder-name fallback, Ubisoft/EA/GOG/Epic/Steam shapes.
+        assert!(is_safe_id("__self__"));
+        assert!(is_safe_id("World of Tanks EU"));
+        assert!(is_safe_id("steam-730"));
+        assert!(is_safe_id("1207658762"));
+        assert!(is_safe_id("0449f415f5404df093b8d67c31940024"));
+        assert!(is_safe_id("FabPlugin_5.8"));
+        assert!(is_safe_id("{3A2F1C4E-0000-0000-0000-000000000000}"));
+        assert!(is_safe_id("wow_classic"));
+        assert!(is_safe_id("league_of_legends.na1"));
+        // Non-ASCII folder names are legitimate on Windows.
+        assert!(is_safe_id("Mundo Cúbico"));
+    }
+
+    #[test]
+    fn traversal_separators_and_drive_prefixes_are_rejected() {
+        for id in [
+            ".", "..", "...", " . ", ".. ", "../x", "..\\x", "a/b", "a\\b", "/abs", "\\\\server\\share", "C:", "C:\\x", "C:x",
+            "a:b", "a\0b", "\0", "a\nb", "a\tb",
+        ] {
             assert!(!is_safe_id(id), "expected {id:?} to be rejected");
         }
     }
+
+    #[test]
+    fn characters_invalid_in_windows_names_are_rejected() {
+        for id in ["a*b", "a?b", "a\"b", "a<b", "a>b", "a|b"] {
+            assert!(!is_safe_id(id), "expected {id:?} to be rejected");
+        }
+    }
+
+    #[test]
+    fn overlong_ids_are_rejected() {
+        assert!(is_safe_id(&"a".repeat(256)));
+        assert!(!is_safe_id(&"a".repeat(257)));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn icon_extraction_works_off_the_main_thread() {
+        // Real check of the async-command change: icon extraction now runs on
+        // pool threads, so prove it still yields a real icon from one.
+        let system_root = std::env::var("SystemRoot").unwrap_or_else(|_| "C:\\Windows".to_string());
+        let exe = std::path::PathBuf::from(system_root).join("System32\\notepad.exe");
+        if !exe.exists() {
+            return;
+        }
+        let uri = std::thread::spawn(move || extract_icon_data_uri(&exe)).join().unwrap();
+        assert!(uri.is_some_and(|u| u.starts_with("data:image/bmp;base64,")));
+    }
 }
+

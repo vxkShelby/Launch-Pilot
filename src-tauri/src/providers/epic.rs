@@ -134,7 +134,7 @@ impl LauncherProvider for EpicProvider {
                 installed_build: Some(item.app_version),
                 status,
                 size_bytes: item.install_size,
-                last_updated: None,
+                ..Game::default()
             });
         }
         Ok(games)
@@ -149,10 +149,77 @@ impl LauncherProvider for EpicProvider {
         &["EpicGamesLauncher.exe"]
     }
 
+    // Epic has no verified update-only trigger. The previous implementation
+    // used `com.epicgames.launcher://apps/<id>?action=launch&silent=true`,
+    // which is a *launch* action — it would have started the game under an
+    // "update" label. Removed: a per-game id now returns an honest Err, and
+    // `supports_update()` is false so the frontend does not offer the action.
+    // The launcher-level call (empty id, the "Open" button) starts the Epic
+    // client from the command registered for its own URI scheme (read from
+    // HKCR\com.epicgames.launcher\shell\open\command — present on the
+    // reference machine as `"<...>\EpicGamesLauncher.exe" %1`).
+    //
+    // Left unused on purpose: each .item's `PendingManifestPath`. Checked on
+    // the reference machine: it is populated on every item, including ones
+    // with nothing queued (all `bIsIncompleteInstall=false`), and the file it
+    // points at does not exist — so it is not an "update pending" signal.
     fn trigger_update(&self, game_id: &str) -> Result<(), String> {
-        open::that(format!(
-            "com.epicgames.launcher://apps/{game_id}?action=launch&silent=true"
-        ))
-        .map_err(|e| e.to_string())
+        if !game_id.is_empty() {
+            return Err("Epic Games has no update-only trigger; open the Epic Games Launcher to update this game".to_string());
+        }
+        let exe = Self::client_exe().ok_or("Epic Games Launcher not found")?;
+        super::spawn_exe(&exe, None)
+    }
+
+    fn supports_update(&self) -> bool {
+        false
+    }
+}
+
+impl EpicProvider {
+    /// Client exe from the `com.epicgames.launcher` URI handler registration.
+    fn client_exe() -> Option<PathBuf> {
+        let hkcr = winreg::RegKey::predef(winreg::enums::HKEY_CLASSES_ROOT);
+        let command: String = hkcr
+            .open_subkey("com.epicgames.launcher\\shell\\open\\command")
+            .ok()?
+            .get_value("")
+            .ok()?;
+        exe_from_command(&command)
+    }
+}
+
+/// First token of a registry shell command: the quoted path, or the text up
+/// to the first space when unquoted.
+fn exe_from_command(command: &str) -> Option<PathBuf> {
+    let command = command.trim();
+    let exe = if let Some(rest) = command.strip_prefix('"') {
+        rest.split('"').next()?
+    } else {
+        command.split_whitespace().next()?
+    };
+    (!exe.is_empty()).then(|| PathBuf::from(exe))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn exe_from_command_handles_quoted_and_unquoted() {
+        // Shape read from this machine's registry.
+        assert_eq!(
+            exe_from_command("\"X:\\Epic Games\\Launcher\\Portal\\Binaries\\Win64\\EpicGamesLauncher.exe\" %1"),
+            Some(PathBuf::from("X:\\Epic Games\\Launcher\\Portal\\Binaries\\Win64\\EpicGamesLauncher.exe"))
+        );
+        assert_eq!(exe_from_command("C:\\x\\a.exe %1"), Some(PathBuf::from("C:\\x\\a.exe")));
+        assert_eq!(exe_from_command(""), None);
+    }
+
+    #[test]
+    fn per_game_update_is_refused_instead_of_launching_the_game() {
+        let err = EpicProvider.trigger_update("0449f415f5404df093b8d67c31940024").unwrap_err();
+        assert!(err.contains("no update-only trigger"), "{err}");
+        assert!(!EpicProvider.supports_update());
     }
 }

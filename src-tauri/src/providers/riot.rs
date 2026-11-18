@@ -67,8 +67,7 @@ impl LauncherProvider for RiotProvider {
                 name: Self::friendly_name(key),
                 installed_build: None,
                 status: UpdateStatus::Unknown,
-                size_bytes: None,
-                last_updated: None,
+                ..Game::default()
             })
             .collect())
     }
@@ -83,9 +82,6 @@ impl LauncherProvider for RiotProvider {
 
     fn trigger_update(&self, _game_id: &str) -> Result<(), String> {
         let exe = self.client_exe().ok_or("Riot Client not installed")?;
-        std::process::Command::new(exe)
-            .spawn()
-            .map(|_| ())
-            .map_err(|e| e.to_string())
+        super::spawn_exe(&exe, None)
     }
 }

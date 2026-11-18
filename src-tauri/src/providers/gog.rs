@@ -53,13 +53,27 @@ struct BuildItem {
     build_id: String,
 }
 
+/// At most this many build lookups in flight at once. They all go to one
+/// host, so an unbounded thread-per-game burst only added TLS handshakes.
+const MAX_CONCURRENT_LOOKUPS: usize = 8;
+
+/// GOG's `INSTALLDATE` value (`2025-10-20 22:19:49`) passed through only if
+/// it has exactly that shape. It is machine-local wall-clock time with no
+/// timezone: on the reference machine it reads ~1 minute after the game
+/// folder's creation time shown in local time, not UTC. Hence it is exposed
+/// as a string, not converted to an epoch.
+fn valid_install_date(s: &str) -> Option<String> {
+    let b = s.trim().as_bytes();
+    let shape = b"dddd-dd-dd dd:dd:dd";
+    let ok = b.len() == shape.len()
+        && b.iter().zip(shape).all(|(c, p)| if *p == b'd' { c.is_ascii_digit() } else { c == p });
+    ok.then(|| String::from_utf8_lossy(b).into_owned())
+}
+
 impl GogProvider {
-    fn latest_build_id(product_id: &str) -> Option<String> {
+    fn latest_build_id(client: &reqwest::blocking::Client, product_id: &str) -> Option<String> {
+        super::uri_safe_id(product_id).ok()?; // id goes into the URL path
         let url = format!("https://content-system.gog.com/products/{product_id}/os/windows/builds?generation=2");
-        let client = reqwest::blocking::Client::builder()
-            .timeout(std::time::Duration::from_secs(4))
-            .build()
-            .ok()?;
         let resp: BuildsResponse = client.get(url).send().ok()?.json().ok()?;
         resp.items.into_iter().next().map(|b| b.build_id)
     }
@@ -90,6 +104,7 @@ impl LauncherProvider for GogProvider {
             name: String,
             version: Option<String>,
             build_id: Option<String>,
+            install_date: Option<String>,
         }
 
         let mut entries = Vec::new();
@@ -125,38 +140,47 @@ impl LauncherProvider for GogProvider {
 
             let version: Option<String> = game_key.get_value("ver").ok();
             let build_id: Option<String> = game_key.get_value("BUILDID").ok();
-            entries.push(Entry { id, name, version, build_id });
+            let install_date = game_key.get_value::<String, _>("INSTALLDATE").ok().and_then(|s| valid_install_date(&s));
+            entries.push(Entry { id, name, version, build_id, install_date });
         }
 
         // Each entry's latest-build lookup is its own network round-trip
-        // (up to the 4s timeout each) — run them concurrently so N
-        // installed GOG games cost one round-trip's worth of wall time
-        // instead of stalling the whole dashboard refresh N-in-a-row.
-        let games = std::thread::scope(|scope| {
-            let handles: Vec<_> = entries
-                .into_iter()
-                .map(|entry| scope.spawn(move || {
-                    let latest = Self::latest_build_id(&entry.id);
-                    (entry, latest)
-                }))
-                .collect();
-            handles
-                .into_iter()
-                .filter_map(|h| h.join().ok())
-                .map(|(entry, latest)| {
-                    let status = derive_status(entry.build_id.as_deref(), latest.as_deref());
-                    Game {
-                        launcher: "gog",
-                        id: entry.id,
-                        name: entry.name,
-                        installed_build: entry.version,
-                        status,
-                        size_bytes: None,
-                        last_updated: None,
-                    }
-                })
-                .collect()
-        });
+        // (up to the 4s timeout), so they run concurrently — but in bounded
+        // batches over ONE shared client (one TLS config + connection pool)
+        // rather than a thread and a fresh client per game.
+        let client = reqwest::blocking::Client::builder()
+            .timeout(std::time::Duration::from_secs(4))
+            .build()
+            .ok();
+        let mut latest: Vec<Option<String>> = Vec::with_capacity(entries.len());
+        for batch in entries.chunks(MAX_CONCURRENT_LOOKUPS) {
+            let results: Vec<Option<String>> = std::thread::scope(|scope| {
+                let handles: Vec<_> = batch
+                    .iter()
+                    .map(|entry| {
+                        let client = client.as_ref();
+                        scope.spawn(move || client.and_then(|c| Self::latest_build_id(c, &entry.id)))
+                    })
+                    .collect();
+                // A panicked lookup becomes "unknown", never a missing game.
+                handles.into_iter().map(|h| h.join().unwrap_or(None)).collect()
+            });
+            latest.extend(results);
+        }
+
+        let games = entries
+            .into_iter()
+            .zip(latest)
+            .map(|(entry, latest)| Game {
+                launcher: "gog",
+                status: derive_status(entry.build_id.as_deref(), latest.as_deref()),
+                id: entry.id,
+                name: entry.name,
+                installed_build: entry.version,
+                install_date: entry.install_date,
+                ..Game::default()
+            })
+            .collect();
         Ok(games)
     }
 
@@ -186,7 +210,14 @@ impl LauncherProvider for GogProvider {
     }
 
     fn trigger_update(&self, game_id: &str) -> Result<(), String> {
-        open::that(format!("goggalaxy://openGameView/{game_id}")).map_err(|e| e.to_string())
+        // Empty id = launcher-level "Open": start the Galaxy client itself
+        // (path from the registry value `icon_source` already uses).
+        if game_id.is_empty() {
+            let exe = self.icon_source().ok_or("GOG Galaxy client not found")?;
+            return super::spawn_exe(&exe, None);
+        }
+        let id = super::uri_safe_id(game_id)?;
+        open::that(format!("goggalaxy://openGameView/{id}")).map_err(|e| e.to_string())
     }
 
     // GOG's own per-game registry entry has a real, exact `exe` value
@@ -212,9 +243,18 @@ impl LauncherProvider for GogProvider {
 
     // Same real exe path already resolved for the game's icon — no separate
     // launch-target heuristic.
+    // Working directory: the registry's own `workingDir` value (present next
+    // to `exe`; "X:\GOG Galaxy\Games\Celtic Kings" on the reference machine),
+    // falling back to the exe's folder.
     fn launch(&self, game_id: &str) -> Result<(), String> {
         let path = self.game_icon_source(game_id).ok_or("no verified exe path for this game")?;
-        std::process::Command::new(&path).spawn().map(|_| ()).map_err(|e| e.to_string())
+        let hklm = winreg::RegKey::predef(winreg::enums::HKEY_LOCAL_MACHINE);
+        let working_dir: Option<String> = hklm
+            .open_subkey(GAMES_KEY)
+            .ok()
+            .and_then(|k| k.open_subkey(game_id).ok())
+            .and_then(|k| k.get_value("workingDir").ok());
+        super::spawn_exe(&path, working_dir.as_deref().filter(|d| !d.is_empty()).map(std::path::Path::new))
     }
 
     fn supports_launch(&self) -> bool {
@@ -249,5 +289,14 @@ mod tests {
     #[test]
     fn both_missing_is_unknown() {
         assert_eq!(derive_status(None, None), UpdateStatus::Unknown);
+    }
+
+    #[test]
+    fn install_date_passes_only_the_observed_shape() {
+        assert_eq!(valid_install_date("2025-10-20 22:19:49"), Some("2025-10-20 22:19:49".to_string()));
+        assert_eq!(valid_install_date(" 2025-10-20 22:19:49 "), Some("2025-10-20 22:19:49".to_string()));
+        for bad in ["", "2025-10-20", "20.10.2025 22:19:49", "2025-10-20T22:19:49", "abcd-ef-gh ii:jj:kk"] {
+            assert_eq!(valid_install_date(bad), None, "{bad:?}");
+        }
     }
 }
