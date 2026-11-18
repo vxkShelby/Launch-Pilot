@@ -51,6 +51,19 @@
 //    observed. Honest Unknown whenever the file isn't found, which is
 //    every hand-assembled instance (the common case) — no fabricated
 //    per-mod status from jar filenames.
+//
+//    "Latest" is filtered to what the instance can actually run. Modrinth's
+//    project-versions endpoint takes `loaders` and `game_versions` (JSON
+//    array strings, e.g. `["fabric"]`) and `include_changelog`:
+//    https://docs.modrinth.com/api/operations/getprojectversions/
+//    The instance's loader and Minecraft version come from its own
+//    mmc-pack.json components (see `InstanceTarget`). Verified live: Sodium
+//    unfiltered -> newest is a NeoForge build for a newer Minecraft;
+//    filtered to fabric + 1.20.1 -> `mc1.20.1-0.5.13-fabric`.
+//    Observed on this machine: Prism keeps an imported pack's original index
+//    at `<instance>/mrpack/modrinth.index.json`, but it is NOT read here
+//    (only 44 of its 169 files were still in that instance's mods folder, so
+//    it no longer describes what is installed).
 use super::{Game, LauncherProvider, UpdateStatus};
 use crate::ini;
 use serde::Deserialize;
@@ -67,6 +80,54 @@ struct MmcComponent {
     uid: String,
     #[serde(rename = "cachedVersion")]
     cached_version: Option<String>,
+    version: Option<String>,
+}
+
+/// What an instance runs: the Minecraft version and (if any) mod loader, as
+/// Modrinth names them. Read from mmc-pack.json component uids; the uids are
+/// the ones Prism's own metadata index lists
+/// (meta.prismlauncher.org/v1/index.json). Only Fabric is present in a real
+/// instance on the reference machine; Quilt/Forge/NeoForge uids are from that
+/// index, not from a local instance (unverified locally).
+#[derive(Debug, PartialEq, Eq)]
+struct InstanceTarget {
+    minecraft: String,
+    loader: Option<&'static str>,
+}
+
+fn loader_for_uid(uid: &str) -> Option<&'static str> {
+    match uid {
+        "net.fabricmc.fabric-loader" => Some("fabric"),
+        "org.quiltmc.quilt-loader" => Some("quilt"),
+        "net.minecraftforge" => Some("forge"),
+        "net.neoforged" => Some("neoforge"),
+        _ => None,
+    }
+}
+
+fn instance_target(pack_json: &str) -> Option<InstanceTarget> {
+    let pack: MmcPack = serde_json::from_str(pack_json).ok()?;
+    let minecraft = pack
+        .components
+        .iter()
+        .find(|c| c.uid == "net.minecraft")
+        .and_then(|c| c.cached_version.clone().or_else(|| c.version.clone()))?;
+    let loader = pack.components.iter().find_map(|c| loader_for_uid(&c.uid));
+    Some(InstanceTarget { minecraft, loader })
+}
+
+/// Query for `GET /v2/project/{id}/version`. Mods are filtered by loader and
+/// Minecraft version; other pack files (resource packs, shaders, datapacks
+/// carry Modrinth loaders like `minecraft`/`iris`) by Minecraft version only.
+/// A mod in an instance with no recognised loader cannot be filtered
+/// honestly, so it yields `None` (the check becomes Unknown).
+fn version_query(target: &InstanceTarget, is_mod: bool) -> Option<Vec<(&'static str, String)>> {
+    let json = |v: &str| serde_json::to_string(&[v]).ok();
+    let mut q = vec![("game_versions", json(&target.minecraft)?), ("include_changelog", "false".to_string())];
+    if is_mod {
+        q.push(("loaders", json(target.loader?)?));
+    }
+    Some(q)
 }
 
 #[derive(Deserialize)]
@@ -81,6 +142,8 @@ struct ModrinthIndex {
 
 #[derive(Deserialize)]
 struct ModrinthFile {
+    #[serde(default)]
+    path: String,
     downloads: Vec<String>,
 }
 
@@ -110,13 +173,8 @@ impl PrismLauncherProvider {
         Some(if path.is_absolute() { path } else { config_dir.join(path) })
     }
 
-    fn minecraft_version(instance_path: &std::path::Path) -> Option<String> {
-        let content = std::fs::read_to_string(instance_path.join("mmc-pack.json")).ok()?;
-        let pack: MmcPack = serde_json::from_str(&content).ok()?;
-        pack.components
-            .into_iter()
-            .find(|c| c.uid == "net.minecraft")
-            .and_then(|c| c.cached_version)
+    fn instance_target(instance_path: &std::path::Path) -> Option<InstanceTarget> {
+        instance_target(&std::fs::read_to_string(instance_path.join("mmc-pack.json")).ok()?)
     }
 
     fn exe_path(&self) -> Option<PathBuf> {
@@ -227,10 +285,27 @@ impl PrismLauncherProvider {
     /// pinned to in the pack index. None means it couldn't be checked
     /// (network failure, bad response) — same as `continue` in the old
     /// sequential loop.
-    fn check_one_mod(client: &reqwest::blocking::Client, project_id: &str, version_id: &str) -> Option<bool> {
-        let resp = client.get(format!("https://api.modrinth.com/v2/project/{project_id}/version")).send().ok()?;
+    fn check_one_mod(
+        client: &reqwest::blocking::Client,
+        target: &InstanceTarget,
+        project_id: &str,
+        version_id: &str,
+        is_mod: bool,
+    ) -> Option<bool> {
+        let query = version_query(target, is_mod)?;
+        let resp = client
+            .get(format!("https://api.modrinth.com/v2/project/{project_id}/version"))
+            .query(&query)
+            .send()
+            .ok()?
+            .error_for_status()
+            .ok()?;
         let versions = resp.json::<Vec<ModrinthVersion>>().ok()?;
-        Some(versions.first().is_some_and(|latest| latest.id != version_id))
+        // Empty after filtering means even the pinned file doesn't match the
+        // instance's loader/version: nothing to compare against, so Unknown,
+        // not "up to date".
+        let latest = versions.first()?;
+        Some(latest.id != version_id)
     }
 
     /// Same three-way logic the old sequential loop used — UpdateAvailable
@@ -239,7 +314,10 @@ impl PrismLauncherProvider {
     /// concurrently (same `thread::scope` + `scope.spawn` + `.join()`
     /// pattern gog.rs already uses for its own one-call-per-item problem)
     /// instead of making them one at a time.
-    fn mod_update_status(instance_path: &Path) -> UpdateStatus {
+    fn mod_update_status(instance_path: &Path, target: Option<&InstanceTarget>) -> UpdateStatus {
+        let Some(target) = target else {
+            return UpdateStatus::Unknown;
+        };
         let Some(index_path) = Self::find_modrinth_index(instance_path) else {
             return UpdateStatus::Unknown;
         };
@@ -253,10 +331,13 @@ impl PrismLauncherProvider {
             return UpdateStatus::Unknown;
         };
 
-        let checks: Vec<(String, String)> = index
+        let checks: Vec<(String, String, bool)> = index
             .files
             .iter()
-            .filter_map(|file| Self::parse_modrinth_url(file.downloads.first()?))
+            .filter_map(|file| {
+                let (project, version) = Self::parse_modrinth_url(file.downloads.first()?)?;
+                Some((project, version, file.path.starts_with("mods/")))
+            })
             .collect();
 
         // Bounded batches instead of one thread + request per mod at once:
@@ -267,7 +348,9 @@ impl PrismLauncherProvider {
             let batch_results: Vec<Option<bool>> = std::thread::scope(|scope| {
                 let handles: Vec<_> = batch
                     .iter()
-                    .map(|(project_id, version_id)| scope.spawn(|| Self::check_one_mod(&client, project_id, version_id)))
+                    .map(|(project_id, version_id, is_mod)| {
+                        scope.spawn(|| Self::check_one_mod(&client, target, project_id, version_id, *is_mod))
+                    })
                     .collect();
                 handles.into_iter().map(|h| h.join().unwrap_or(None)).collect()
             });
@@ -336,8 +419,9 @@ impl LauncherProvider for PrismLauncherProvider {
             let dir_name = path.file_name().and_then(|f| f.to_str()).unwrap_or("instance").to_string();
             let name = cfg.get("name").cloned().unwrap_or_else(|| dir_name.clone());
             let last_played_ms: Option<u64> = cfg.get("lastLaunchTime").and_then(|s| s.parse().ok());
-            let installed_version = Self::minecraft_version(&path);
-            let status = Self::mod_update_status(&path);
+            let target = Self::instance_target(&path);
+            let installed_version = target.as_ref().map(|t| t.minecraft.clone());
+            let status = Self::mod_update_status(&path, target.as_ref());
 
             games.push(Game {
                 launcher: "prismlauncher",
@@ -375,6 +459,68 @@ impl LauncherProvider for PrismLauncherProvider {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    const FABRIC_PACK: &str = r#"{"components":[
+        {"cachedVersion":"3.3.1","uid":"org.lwjgl3","version":"3.3.1"},
+        {"cachedVersion":"1.20.1","uid":"net.minecraft","version":"1.20.1"},
+        {"cachedVersion":"1.20.1","uid":"net.fabricmc.intermediary","version":"1.20.1"},
+        {"cachedVersion":"0.19.5","uid":"net.fabricmc.fabric-loader","version":"0.19.5"}],"formatVersion":1}"#;
+
+    #[test]
+    fn instance_target_reads_fabric_and_minecraft_version() {
+        assert_eq!(
+            instance_target(FABRIC_PACK),
+            Some(InstanceTarget { minecraft: "1.20.1".to_string(), loader: Some("fabric") })
+        );
+    }
+
+    #[test]
+    fn instance_target_maps_other_loader_uids_and_vanilla() {
+        let pack = |uid: &str| format!(r#"{{"components":[{{"cachedVersion":"1.21","uid":"net.minecraft"}},{{"uid":"{uid}"}}]}}"#);
+        assert_eq!(instance_target(&pack("org.quiltmc.quilt-loader")).unwrap().loader, Some("quilt"));
+        assert_eq!(instance_target(&pack("net.minecraftforge")).unwrap().loader, Some("forge"));
+        assert_eq!(instance_target(&pack("net.neoforged")).unwrap().loader, Some("neoforge"));
+        assert_eq!(instance_target(&pack("org.lwjgl3")).unwrap().loader, None);
+    }
+
+    #[test]
+    fn instance_target_falls_back_to_version_and_rejects_missing_minecraft() {
+        let pinned = r#"{"components":[{"uid":"net.minecraft","version":"1.19.4"}]}"#;
+        assert_eq!(instance_target(pinned).unwrap().minecraft, "1.19.4");
+        assert_eq!(instance_target(r#"{"components":[]}"#), None);
+        assert_eq!(instance_target("not json"), None);
+    }
+
+    #[test]
+    fn version_query_filters_mods_by_loader_and_game_version() {
+        let t = instance_target(FABRIC_PACK).unwrap();
+        let q = version_query(&t, true).unwrap();
+        assert!(q.contains(&("loaders", r#"["fabric"]"#.to_string())));
+        assert!(q.contains(&("game_versions", r#"["1.20.1"]"#.to_string())));
+        assert!(q.contains(&("include_changelog", "false".to_string())));
+    }
+
+    #[test]
+    fn version_query_non_mod_files_skip_the_loader_filter() {
+        let t = instance_target(FABRIC_PACK).unwrap();
+        let q = version_query(&t, false).unwrap();
+        assert!(q.iter().all(|(k, _)| *k != "loaders"));
+        assert!(q.iter().any(|(k, _)| *k == "game_versions"));
+    }
+
+    #[test]
+    fn version_query_mod_without_known_loader_cannot_be_filtered() {
+        let t = InstanceTarget { minecraft: "1.20.1".to_string(), loader: None };
+        assert_eq!(version_query(&t, true), None);
+        assert!(version_query(&t, false).is_some());
+    }
+
+    #[test]
+    fn version_query_escapes_odd_minecraft_version_strings() {
+        let t = InstanceTarget { minecraft: "1.14 \"x\"".to_string(), loader: Some("fabric") };
+        let q = version_query(&t, false).unwrap();
+        assert_eq!(q[0].1, r#"["1.14 \"x\""]"#);
+    }
 
     #[test]
     fn mod_checks_all_current_is_up_to_date() {

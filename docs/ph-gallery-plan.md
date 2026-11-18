@@ -85,3 +85,24 @@ Rules for every shot:
 - Replace `docs/screenshot.png` (used by the landing page and README) with shot 1 once captured; the current file is
   older than v0.8.3. If the new image dimensions differ from 1116x759, update the `width`/`height` attributes on the
   `<img>` in `docs/index.html`.
+
+## Capture log (v0.9.0 working tree, `tauri dev` debug build, real library on this PC)
+
+All images are 1270x760 PNG (WebView client area, grabbed with PrintWindow, no pixel edits) in `docs/ph/`. Real state only:
+the one pending update (War Thunder, Steam) was genuinely pending at capture time. No names, emails or user paths visible.
+Caveat: captured from `tauri dev`, not the release build the plan asks for; re-shoot from the shipped build if that matters.
+
+Produced:
+- Shot 1 hero: `docs/ph/01-hero-updates.png` (also copied to `docs/screenshot.png`; landing `<img>` set to 1270x760).
+- Shot 2 unknown: `docs/ph/02-unknown-not-guess.png`. Full window, not a close crop: GOG "Up to date" next to Ubisoft Connect "Unknown" rows. Crop at edit time if wanted.
+- Shot 5 privacy: `docs/ph/05-first-run-privacy.png`. Real first-run welcome dialog (profile storage temporarily set aside so it showed once, then restored). Some launcher/game icons behind the dialog had not drawn yet in that fresh profile.
+- Shot 7 light theme: `docs/ph/07-light-theme.png` (light theme ships in v0.9.0).
+- Extra: `docs/ph/04-confirm-before-update-all.png` (Update all confirm dialog, cancelled, nothing sent).
+- Extra: `docs/ph/06-settings-privacy.png` (Settings: all background options off by default, "Nothing is sent anywhere").
+
+Skipped:
+- Shot 3 before/after: needs real launcher windows tiled on the desktop; not staged to avoid launching launchers/games.
+- Shot 4 truth table: a designed graphic, not a screenshot; not produced here.
+- Shot 6 loop: needs a real Update click (would start a real download); not done.
+- Error row and app-update banner shots: no such state exists on this machine right now. (Steam's real "2.0 TB" total is visible in shots 01 and 07.)
+- The plan's fallback "Launch button" shot is covered by 01/02/07 (Launch buttons visible on Steam, GOG, Ubisoft rows).

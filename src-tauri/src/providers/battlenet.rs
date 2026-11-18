@@ -16,10 +16,21 @@
 //
 // Live update-in-progress detection: REAL, verified live on this machine —
 // %LOCALAPPDATA%\Battle.net\Logs\battle.net-<timestamp>.log contains lines
-// like `[InstallManager] Operation status changed: opType=Update
-// oldStatus=Off newStatus=On agentUid=<product>` (observed during the
-// client's own self-update). newStatus=On for a matching agentUid means
-// actively updating right now.
+// like `D 2026-10-26 20:25:48.415683 [InstallInfo] {Main} Operation status
+// changed: opType=Update oldStatus=Off newStatus=On agentUid=s2` (copied
+// from this machine's real logs: the client's own self-update and a
+// StarCraft II update). opType=Update + newStatus=On for a matching
+// agentUid means actively updating right now. The same logs also have
+// opType=Execute lines (e.g. `Execute ... newStatus=On agentUid=s2` for
+// five minutes, then Off); these are NOT updates and are ignored. That
+// Execute means "game running" is inferred, not verified.
+//
+// History: this matched the tag `[InstallManager]`, which the real
+// "Operation status changed" lines never carry (they carry `[InstallInfo]`),
+// so an update could never be detected from the current client's logs. The
+// match is now on the message text and opType, not the tag, and the log
+// picker only considers `battle.net-*.log` (libcef-*.log files sit in the
+// same folder and could have been picked as "newest").
 //
 // Update status otherwise: no local field gives "latest available version"
 // for a specific game — honest Unknown when nothing is actively updating.
@@ -52,6 +63,11 @@ const KNOWN_PRODUCTS: &[(&str, &str)] = &[
     ("lazr", "Call of Duty: Modern Warfare II"),
 ];
 
+/// `battle.net-<timestamp>.log` only; the folder also holds `libcef-*.log`.
+fn is_client_log(file_name: &str) -> bool {
+    file_name.starts_with("battle.net-") && file_name.ends_with(".log")
+}
+
 pub struct BattleNetProvider;
 
 impl BattleNetProvider {
@@ -79,7 +95,7 @@ impl BattleNetProvider {
         let entries = std::fs::read_dir(&dir).ok()?;
         let latest = entries
             .flatten()
-            .filter(|e| e.path().extension().and_then(|x| x.to_str()) == Some("log"))
+            .filter(|e| is_client_log(&e.file_name().to_string_lossy()))
             .max_by_key(|e| e.metadata().and_then(|m| m.modified()).ok())?;
         std::fs::read_to_string(latest.path()).ok()
     }
@@ -95,9 +111,14 @@ impl BattleNetProvider {
             .lines()
             .rev()
             // Whole-token match: a substring test would let `agentUid=wow`
-            // also match `agentUid=wow_classic`.
-            .find(|line| line.contains("[InstallManager] Operation status changed") && line.split_whitespace().any(|t| t == marker))
-            .is_some_and(|line| line.contains("newStatus=On"))
+            // also match `agentUid=wow_classic`. Only opType=Update counts:
+            // Execute lines are not updates.
+            .find(|line| {
+                line.contains("Operation status changed:")
+                    && line.split_whitespace().any(|t| t == marker)
+                    && line.split_whitespace().any(|t| t == "opType=Update")
+            })
+            .is_some_and(|line| line.split_whitespace().any(|t| t == "newStatus=On"))
     }
 }
 
@@ -202,10 +223,39 @@ impl LauncherProvider for BattleNetProvider {
 mod tests {
     use super::*;
 
-    // Line shape copied from the comment above (observed in a real
-    // Battle.net log during the client's own self-update).
+    // Line shape copied from this machine's real battle.net-*.log.
+    fn line_op(op: &str, status: &str, uid: &str) -> String {
+        format!("D 2026-10-26 20:25:48.415683 [InstallInfo] {{Main}} Operation status changed: opType={op} oldStatus=Off newStatus={status} agentUid={uid}")
+    }
     fn line(status: &str, uid: &str) -> String {
-        format!("[InstallManager] Operation status changed: opType=Update oldStatus=Off newStatus={status} agentUid={uid}")
+        line_op("Update", status, uid)
+    }
+
+    #[test]
+    fn real_log_line_shape_is_recognised() {
+        let real = "D 2026-10-26 20:25:48.415683 [InstallInfo] {Main} Operation status changed: opType=Update oldStatus=Off newStatus=On agentUid=s2";
+        assert!(BattleNetProvider::is_updating(real, "s2"));
+    }
+
+    #[test]
+    fn execute_operations_are_not_updates() {
+        // Real log: `opType=Execute ... newStatus=On agentUid=s2` lasted 5 minutes.
+        assert!(!BattleNetProvider::is_updating(&line_op("Execute", "On", "s2"), "s2"));
+        // An Execute line after an Update-On does not end the update.
+        let log = format!("{}\n{}\n", line("On", "s2"), line_op("Execute", "Off", "s2"));
+        assert!(BattleNetProvider::is_updating(&log, "s2"));
+    }
+
+    #[test]
+    fn pending_is_not_updating() {
+        assert!(!BattleNetProvider::is_updating(&line("Pending", "s2"), "s2"));
+    }
+
+    #[test]
+    fn only_client_logs_are_candidates() {
+        assert!(is_client_log("battle.net-20261026T203600.443848.log"));
+        assert!(!is_client_log("libcef-20261026T203604.521014.log"));
+        assert!(!is_client_log("battle.net-20261026T203600.443848.log.old"));
     }
 
     #[test]

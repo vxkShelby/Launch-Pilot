@@ -101,6 +101,7 @@ pub fn run() {
             commands::provider_data,
             commands::trigger_update,
             commands::launch_game,
+            commands::update_space,
             shell::get_settings,
             shell::set_setting,
             shell::set_pending,

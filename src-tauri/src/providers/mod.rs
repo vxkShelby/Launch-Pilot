@@ -5,6 +5,7 @@ pub mod epic;
 pub mod gog;
 pub mod prismlauncher;
 pub mod riot;
+pub mod rockstar;
 pub mod steam;
 pub mod ubisoft;
 pub mod wargaming;
@@ -105,6 +106,12 @@ pub trait LauncherProvider: Send + Sync {
     /// games doesn't have to carry a path for every one of them up front).
     /// None means "no verified path for this game," not "no icon exists."
     fn game_icon_source(&self, _game_id: &str) -> Option<std::path::PathBuf> {
+        None
+    }
+    /// Folder (library root) that receives this game's update download, so
+    /// the confirmation dialog can check free space on the right drive.
+    /// None = not known for this launcher/game (no guess is made).
+    fn install_root(&self, _game_id: &str) -> Option<std::path::PathBuf> {
         None
     }
     /// Launch one specific game's own exe — spawns the exact same real
@@ -420,6 +427,7 @@ pub fn all_providers() -> Vec<Box<dyn LauncherProvider>> {
         Box::new(ubisoft::UbisoftProvider),
         Box::new(battlenet::BattleNetProvider),
         Box::new(riot::RiotProvider),
+        Box::new(rockstar::RockstarProvider),
         Box::new(prismlauncher::PrismLauncherProvider),
         Box::new(wargaming::WargamingProvider),
         Box::new(ageofthering::AgeOfTheRingProvider),

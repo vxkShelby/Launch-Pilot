@@ -1,5 +1,5 @@
 use crate::providers::{all_providers, running_process_names, Game};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 // Threading: Tauri runs a plain `fn` command inline on the thread that
 // handles the IPC message, so a provider that waits on a registry scan, a
@@ -313,9 +313,175 @@ pub async fn launch_game(launcher: String, game_id: String) -> Result<(), String
     .map_err(|e| e.to_string())?
 }
 
+// ---------------------------------------------------------------- free space
+/// One pending game as the frontend knows it. `bytes` is the launcher-reported
+/// download size (`update_bytes_total`), `None` when it has none.
+#[derive(Deserialize)]
+pub struct PendingItem {
+    pub launcher: String,
+    pub game_id: String,
+    pub bytes: Option<u64>,
+}
+
+/// Pending downloads that land on one drive.
+#[derive(Serialize, Debug, PartialEq, Eq)]
+pub struct DriveSpace {
+    /// `"D:"`.
+    pub drive: String,
+    /// Sum of the known download sizes for games on this drive.
+    pub required_bytes: u64,
+    /// Games on this drive whose size is unknown (not in `required_bytes`).
+    pub unknown_size: usize,
+    pub games: usize,
+    /// Free bytes available to the current user; `None` if the OS call failed.
+    pub free_bytes: Option<u64>,
+}
+
+#[derive(Serialize)]
+pub struct SpaceReport {
+    pub drives: Vec<DriveSpace>,
+    /// Games whose download drive is not known (non-Steam launchers, UNC
+    /// libraries, game not found). They are not part of any drive total.
+    pub unplaced: usize,
+}
+
+/// `"X:/Steam"` / `"d:\\SteamLibrary"` -> `"X:"` / `"D:"`. UNC and relative
+/// paths -> None.
+fn drive_of(path: &str) -> Option<String> {
+    let mut chars = path.chars();
+    let letter = chars.next().filter(|c| c.is_ascii_alphabetic())?;
+    (chars.next() == Some(':')).then(|| format!("{}:", letter.to_ascii_uppercase()))
+}
+
+/// Groups `(drive, bytes)` pairs by drive, sorted by drive letter. Pairs with
+/// no drive count toward the returned `unplaced`. Free space is filled in
+/// separately so this stays pure.
+fn group_by_drive(items: &[(Option<String>, Option<u64>)]) -> (Vec<DriveSpace>, usize) {
+    let mut drives: Vec<DriveSpace> = Vec::new();
+    let mut unplaced = 0;
+    for (drive, bytes) in items {
+        let Some(drive) = drive else {
+            unplaced += 1;
+            continue;
+        };
+        let at = match drives.iter().position(|d| &d.drive == drive) {
+            Some(i) => i,
+            None => {
+                drives.push(DriveSpace { drive: drive.clone(), required_bytes: 0, unknown_size: 0, games: 0, free_bytes: None });
+                drives.len() - 1
+            }
+        };
+        let d = &mut drives[at];
+        d.games += 1;
+        match bytes {
+            Some(b) => d.required_bytes = d.required_bytes.saturating_add(*b),
+            None => d.unknown_size += 1,
+        }
+    }
+    drives.sort_by(|a, b| a.drive.cmp(&b.drive));
+    (drives, unplaced)
+}
+
+/// `GetDiskFreeSpaceExW` (lpFreeBytesAvailableToCaller) for `"D:"`.
+/// https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-getdiskfreespaceexw
+#[cfg(windows)]
+fn free_bytes_on(drive: &str) -> Option<u64> {
+    use windows_sys::Win32::Storage::FileSystem::GetDiskFreeSpaceExW;
+    let root: Vec<u16> = format!("{drive}\\").encode_utf16().chain(std::iter::once(0)).collect();
+    let mut free: u64 = 0;
+    // SAFETY: `root` is NUL-terminated and outlives the call; the two unused
+    // out-pointers are documented as optional (null).
+    let ok = unsafe { GetDiskFreeSpaceExW(root.as_ptr(), &mut free, std::ptr::null_mut(), std::ptr::null_mut()) };
+    (ok != 0).then_some(free)
+}
+
+#[cfg(not(windows))]
+fn free_bytes_on(_drive: &str) -> Option<u64> {
+    None
+}
+
+/// For the Update-all confirmation: where will the pending downloads land and
+/// how much room is there. Only launchers that report an install root
+/// (Steam) are placed on a drive; everything else is `unplaced`.
+#[tauri::command]
+pub async fn update_space(items: Vec<PendingItem>) -> Result<SpaceReport, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let providers = all_providers();
+        let placed: Vec<(Option<String>, Option<u64>)> = items
+            .iter()
+            .map(|item| {
+                let drive = is_safe_id(&item.game_id)
+                    .then(|| providers.iter().find(|p| p.id() == item.launcher))
+                    .flatten()
+                    .and_then(|p| p.install_root(&item.game_id))
+                    .and_then(|root| drive_of(&root.to_string_lossy()));
+                (drive, item.bytes)
+            })
+            .collect();
+        let (mut drives, unplaced) = group_by_drive(&placed);
+        for d in &mut drives {
+            d.free_bytes = free_bytes_on(&d.drive);
+        }
+        SpaceReport { drives, unplaced }
+    })
+    .await
+    .map_err(|e| format!("free-space check failed: {e}"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn drive_of_takes_the_letter_from_steam_style_paths() {
+        assert_eq!(drive_of("X:/Steam"), Some("X:".to_string()));
+        assert_eq!(drive_of("d:\\SteamLibrary"), Some("D:".to_string()));
+        assert_eq!(drive_of("C:"), Some("C:".to_string()));
+    }
+
+    #[test]
+    fn drive_of_rejects_unc_relative_and_empty() {
+        assert_eq!(drive_of("\\\\server\\share"), None);
+        assert_eq!(drive_of("Steam/lib"), None);
+        assert_eq!(drive_of("1:/x"), None);
+        assert_eq!(drive_of(""), None);
+    }
+
+    #[test]
+    fn grouping_sums_known_sizes_counts_unknown_and_unplaced() {
+        let d = |s: &str| Some(s.to_string());
+        let items = [(d("X:"), Some(100)), (d("D:"), Some(5)), (d("X:"), None), (d("X:"), Some(50)), (None, Some(7)), (None, None)];
+        let (drives, unplaced) = group_by_drive(&items);
+        assert_eq!(unplaced, 2);
+        assert_eq!(
+            drives,
+            vec![
+                DriveSpace { drive: "D:".into(), required_bytes: 5, unknown_size: 0, games: 1, free_bytes: None },
+                DriveSpace { drive: "X:".into(), required_bytes: 150, unknown_size: 1, games: 3, free_bytes: None },
+            ]
+        );
+    }
+
+    #[test]
+    fn grouping_nothing_is_empty() {
+        let (drives, unplaced) = group_by_drive(&[]);
+        assert!(drives.is_empty());
+        assert_eq!(unplaced, 0);
+    }
+
+    #[test]
+    fn grouping_does_not_overflow_on_huge_sizes() {
+        let d = Some("X:".to_string());
+        let (drives, _) = group_by_drive(&[(d.clone(), Some(u64::MAX)), (d, Some(10))]);
+        assert_eq!(drives[0].required_bytes, u64::MAX);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn free_bytes_on_the_system_drive_is_readable() {
+        let sys = std::env::var("SystemDrive").unwrap_or_else(|_| "C:".to_string());
+        assert!(free_bytes_on(&sys).is_some_and(|b| b > 0));
+    }
 
     #[test]
     fn empty_string_is_safe() {

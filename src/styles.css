@@ -879,6 +879,10 @@ dialog::backdrop {
   color: var(--ink-dim);
 }
 
+.confirm-warn {
+  color: var(--amber);
+}
+
 kbd {
   font-family: var(--font-mono);
   font-size: var(--fs-cap);
@@ -960,4 +964,8 @@ kbd {
   .hint {
     display: none;
   }
+}
+
+#confirm-space:not(:empty) {
+  margin: 0.25rem 0 0.75rem;
 }

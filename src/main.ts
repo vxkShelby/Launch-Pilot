@@ -59,6 +59,7 @@ const LAUNCHER_LABEL: Record<string, string> = {
   ubisoft: "Ubisoft Connect",
   battlenet: "Battle.net",
   riot: "Riot Client",
+  rockstar: "Rockstar Games Launcher",
   prismlauncher: "PrismLauncher",
   wargaming: "Wargaming Game Center",
   ageofthering: "Age of the Ring",
@@ -1052,6 +1053,57 @@ function openUpdateAllConfirm() {
   }
   dlg.returnValue = "";
   dlg.showModal();
+  void fillConfirmSpace(pending);
+}
+
+interface DriveSpace {
+  drive: string;
+  required_bytes: number;
+  unknown_size: number;
+  games: number;
+  free_bytes: number | null;
+}
+
+let confirmSpaceToken = 0;
+
+// Free space on the drive(s) the pending downloads land on. Shown after the
+// dialog opens (the check runs on a worker thread); a warning never blocks.
+async function fillConfirmSpace(pending: Game[]) {
+  const token = ++confirmSpaceToken;
+  const list = $("#confirm-space");
+  const warn = $("#confirm-warn");
+  list?.replaceChildren();
+  if (warn) warn.hidden = true;
+  let report: { drives: DriveSpace[]; unplaced: number };
+  try {
+    report = await invoke("update_space", {
+      items: pending.map((g) => ({ launcher: g.launcher, game_id: g.id, bytes: g.update_bytes_total })),
+    });
+  } catch {
+    return; // the size line above is still accurate; free space just isn't shown
+  }
+  if (token !== confirmSpaceToken || !list) return;
+  const short: string[] = [];
+  for (const d of report.drives) {
+    const li = document.createElement("li");
+    const need = d.required_bytes > 0 ? `${formatSize(d.required_bytes)} to download` : "download size unknown";
+    const extra = d.unknown_size > 0 && d.required_bytes > 0 ? ` (+ ${plural(d.unknown_size, "game")} of unknown size)` : "";
+    const free = d.free_bytes != null ? `${formatSize(d.free_bytes)} free on ${d.drive}` : `free space on ${d.drive} unreadable`;
+    li.textContent = `${d.drive} ${need}${extra} · ${free}`;
+    list.append(li);
+    if (d.free_bytes != null && d.free_bytes < d.required_bytes) {
+      short.push(`${d.drive} needs at least ${formatSize(d.required_bytes)} but has ${formatSize(d.free_bytes)} free`);
+    }
+  }
+  if (report.unplaced > 0) {
+    const li = document.createElement("li");
+    li.textContent = `Drive unknown for ${plural(report.unplaced, "game")} (only Steam downloads are placed on a drive).`;
+    list.append(li);
+  }
+  if (warn && short.length > 0) {
+    warn.textContent = `Not enough free space: ${short.join("; ")}. You can still continue, but the download may stall.`;
+    warn.hidden = false;
+  }
 }
 
 async function runUpdateAll() {

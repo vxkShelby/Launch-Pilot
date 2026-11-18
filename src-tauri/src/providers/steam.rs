@@ -208,6 +208,16 @@ impl LauncherProvider for SteamProvider {
         None
     }
 
+    /// The library folder whose `steamappsppmanifest_<id>.acf` exists:
+    /// Steam downloads the update into that same library's `steamapps`.
+    fn install_root(&self, game_id: &str) -> Option<PathBuf> {
+        super::uri_safe_id(game_id).ok()?;
+        let steam_path = self.steam_path()?;
+        self.library_paths(&steam_path)
+            .into_iter()
+            .find(|lib| lib.join("steamapps").join(format!("appmanifest_{game_id}.acf")).is_file())
+    }
+
     fn trigger_update(&self, game_id: &str) -> Result<(), String> {
         // Empty id = the launcher-level "Open" button: start the Steam client
         // itself (the exe detect() already checks for) instead of opening a
