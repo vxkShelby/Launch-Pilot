@@ -43,7 +43,7 @@ whether an update is pending, LaunchPilot says **Unknown** instead of guessing.
 | Launcher | Detect | Game list | Update status | Launch button | Update trigger |
 |---|:---:|:---:|:---:|:---:|---|
 | **Steam** | ✅ | ✅ | ✅ (`StateFlags` + build id vs. target build id) | ✅ `steam://rungameid/<appid>` | `steam://validate/<appid>` |
-| **Epic Games** | ✅ | ✅ | live "Updating" (`bIsIncompleteInstall` + staging writes) | — | `com.epicgames.launcher://apps/<id>` |
+| **Epic Games** | ✅ | ✅ | live "Updating" (`bIsIncompleteInstall` + staging writes) | — | none (no update-only mechanism exists; opens the Epic client) |
 | **GOG Galaxy** | ✅ | ✅ | ✅ installed build vs. `content-system.gog.com` (no login) | ✅ game exe | `goggalaxy://openGameView/<id>` |
 | **EA app** | ✅ | ✅ (registry) | live "Updating" (recent `.tmp` staging writes); a stalled `.tmp` shows "Update available" | ✅ game exe | `origin2://` (opens client) |
 | **Ubisoft Connect** | ✅ | ✅ (registry + Steam cross-detect) | Unknown *(no local field exists)* | ✅ game exe, or via Steam for Steam-installed titles | `uplay://` (opens client) |
@@ -51,6 +51,7 @@ whether an update is pending, LaunchPilot says **Unknown** instead of guessing.
 | **Riot Client** | ✅ | ✅ (light) | Unknown *(no local field exists)* | — | launches `RiotClientServices.exe` |
 | **PrismLauncher** | ✅ | ✅ | ✅ launcher itself (GitHub releases) + per-mod (Modrinth pack instances only) | — | launches `prismlauncher.exe` |
 | **Wargaming Game Center** | ✅ | ✅ (`preferences.xml`) | ✅ (`game_info.xml` installed vs. available) | — | launches `wgc.exe` (found by drive scan, heuristic) |
+| **Rockstar Games Launcher** | ✅ (registry + `Launcher.exe`) | — *(game list is opaque binary)* | — | — | opens the launcher only |
 | **Age of the Ring** | heuristic (drive scan, no installer footprint) | ✅ (mod + 2 base games) | Unknown *(no local field exists)* | — | launches `AotR_Launcher.exe` |
 
 Steam is the reference implementation: full local visibility into what's installed, what build it's

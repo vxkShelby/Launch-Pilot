@@ -44,9 +44,9 @@ Rules for every shot:
 
 ## 4. Per-launcher truth table
 
-- State: designed graphic, not a screenshot. Reproduce the README matrix ("What's real, per launcher") in the app
-  palette: Detect / Game list / Update status / Launch button columns, one row per launcher. Use the exact
-  wording from README.md; if the matrix changes, regenerate this from it.
+- State: designed graphic, not a screenshot. Built from the provider code (`src-tauri/src/providers/*.rs`), not from
+  README text, in the app palette: Game list / Update status / Launch button / Update button, one row per launcher.
+  Source: `docs/ph/truth-table.html`; if a provider changes, update the HTML and re-render.
 - Status wording must stay as in README: Steam, GOG, Wargaming, Prism = update status; Epic, EA, Battle.net = live
   "Updating"; Ubisoft, Riot, Age of the Ring = Unknown.
 - Caption: "What it can see per launcher. The gaps are real, and we show them."
@@ -96,13 +96,13 @@ Produced:
 - Shot 1 hero: `docs/ph/01-hero-updates.png` (also copied to `docs/screenshot.png`; landing `<img>` set to 1270x760).
 - Shot 2 unknown: `docs/ph/02-unknown-not-guess.png`. Full window, not a close crop: GOG "Up to date" next to Ubisoft Connect "Unknown" rows. Crop at edit time if wanted.
 - Shot 5 privacy: `docs/ph/05-first-run-privacy.png`. Real first-run welcome dialog (profile storage temporarily set aside so it showed once, then restored). Some launcher/game icons behind the dialog had not drawn yet in that fresh profile.
+- Shot 4 truth table: `docs/ph/03-truth-table.png` (1270x760, rendered from `docs/ph/truth-table.html` with headless Edge; fonts are the repo's IBM Plex files). A designed graphic, not a screenshot. Every row is read from `src-tauri/src/providers/*.rs` (which `UpdateStatus` values a provider can emit, `supports_launch()`, `supports_update()`, `trigger_update()`), not copied from README, which differs in two places: README lists an Epic update trigger (code: `supports_update()` is false) and has no Rockstar row (code has the provider, no game list). Regenerate by editing the HTML and re-rendering if a provider changes.
 - Shot 7 light theme: `docs/ph/07-light-theme.png` (light theme ships in v0.9.0).
 - Extra: `docs/ph/04-confirm-before-update-all.png` (Update all confirm dialog, cancelled, nothing sent).
 - Extra: `docs/ph/06-settings-privacy.png` (Settings: all background options off by default, "Nothing is sent anywhere").
 
 Skipped:
 - Shot 3 before/after: needs real launcher windows tiled on the desktop; not staged to avoid launching launchers/games.
-- Shot 4 truth table: a designed graphic, not a screenshot; not produced here.
 - Shot 6 loop: needs a real Update click (would start a real download); not done.
 - Error row and app-update banner shots: no such state exists on this machine right now. (Steam's real "2.0 TB" total is visible in shots 01 and 07.)
 - The plan's fallback "Launch button" shot is covered by 01/02/07 (Launch buttons visible on Steam, GOG, Ubisoft rows).

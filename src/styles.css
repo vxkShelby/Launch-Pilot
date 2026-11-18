@@ -779,9 +779,76 @@ progress {
   box-shadow: 0 0 5px var(--led-on-glow);
 }
 
+/* Windows High Contrast: the UA drops our backgrounds and remaps colours, so
+   every state that was a fill or a hue gets a shape/border/system colour. */
 @media (forced-colors: active) {
+  .running-dot {
+    border-color: CanvasText;
+  }
   .running-dot-on {
     background: CanvasText;
+    box-shadow: none;
+  }
+  button:focus-visible,
+  input:focus-visible,
+  summary:focus-visible,
+  select:focus-visible {
+    outline: 2px solid Highlight;
+    outline-offset: 2px;
+  }
+  button:disabled {
+    opacity: 1;
+    color: GrayText;
+    border-color: GrayText;
+  }
+  /* Primary: filled with the selection colour. */
+  #update-all-btn,
+  .btn-primary,
+  #update-all-btn:hover:not(:disabled),
+  .btn-primary:hover:not(:disabled) {
+    forced-color-adjust: none;
+    background: Highlight;
+    border-color: Highlight;
+    color: HighlightText;
+  }
+  /* Quiet buttons keep a visible edge; hover/pressed use Highlight. */
+  .btn-launch,
+  .btn-quiet,
+  .icon-btn {
+    border-color: ButtonText;
+    color: ButtonText;
+  }
+  .btn-update {
+    border: 2px solid LinkText;
+    color: LinkText;
+  }
+  .btn-update:hover:not(:disabled),
+  .btn-launch:hover:not(:disabled),
+  .chip[aria-pressed="true"] {
+    forced-color-adjust: none;
+    background: Highlight;
+    border-color: Highlight;
+    color: HighlightText;
+  }
+  /* Pills lose their fill: outline them (solid = pending, dashed = running).
+     Outlines don't change layout. */
+  .status-update_available,
+  .lane-badge {
+    outline: 2px solid LinkText;
+    outline-offset: -2px;
+  }
+  .status-updating {
+    outline: 2px dashed CanvasText;
+    outline-offset: -2px;
+  }
+  .banner {
+    border: 2px solid CanvasText;
+  }
+  .row-msg-error {
+    border-left-color: CanvasText;
+  }
+  dialog {
+    border: 2px solid CanvasText;
   }
 }
 

@@ -29,12 +29,25 @@ fn log_crash(line: &str) {
 // panic = "abort" in the release profile still runs this hook first, it just
 // skips unwinding afterward — so a panic still lands one line in the log
 // before the process dies, instead of vanishing silently for the user.
+// It also shows the message box: Tauri panics ("Failed to setup app") instead
+// of returning Err when the WebView2 environment cannot be created, so the
+// dialog after `.run()` below is never reached for that failure (verified with
+// an unusable WebView2 data folder: crash.log was written, nothing visible).
 fn install_crash_logger() {
-    std::panic::set_hook(Box::new(|info| log_crash(&info.to_string())));
+    std::panic::set_hook(Box::new(|info| {
+        log_crash(&info.to_string());
+        let p = info.payload();
+        let msg = p
+            .downcast_ref::<&str>()
+            .map(|s| s.to_string())
+            .or_else(|| p.downcast_ref::<String>().cloned())
+            .unwrap_or_else(|| "unexpected internal error".to_string());
+        show_fatal_error(&msg);
+    }));
 }
 
 /// The release build is a GUI-subsystem process (`windows_subsystem =
-/// "windows"` in main.rs), so a startup failure such as a missing WebView2
+/// "windows"` in main.rs), so a fatal error such as a missing WebView2
 /// runtime would otherwise end the process with no visible sign. Show a
 /// native message box with the error and where the log is.
 #[cfg(windows)]
@@ -42,7 +55,7 @@ fn show_fatal_error(message: &str) {
     use windows_sys::Win32::UI::WindowsAndMessaging::{MessageBoxW, MB_ICONERROR, MB_OK};
     let wide = |s: &str| -> Vec<u16> { s.encode_utf16().chain(std::iter::once(0)).collect() };
     let text = wide(&format!(
-        "LaunchPilot could not start.\n\n{message}\n\nDetails were written to %APPDATA%\\LaunchPilot\\crash.log"
+        "LaunchPilot hit a fatal error and has to close.\n\n{message}\n\nDetails were written to %APPDATA%\\LaunchPilot\\crash.log"
     ));
     let title = wide("LaunchPilot");
     // SAFETY: both buffers are NUL-terminated UTF-16 and outlive the call; a
